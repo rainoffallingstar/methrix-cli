@@ -1,0 +1,177 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# EditorConfig (if not committed)
+.editorconfig
+
+# Build artifacts
+/target/
+/src/*.o
+/src/*.so
+/src/*.dylib
+/src/*.dll
+
+# Testing
+/tests/**/*.h5
+/tests/**/*.rds
+/tests/**/*.xlsx
+/tests/output/
+
+# Test data directories (ignore entire directories)
+# These directories contain large test files and reference data
+# that can be regenerated or downloaded as needed
+testdata/
+refer-code/
+
+# Logs
+*.log
+logs/
+*.out
+*.err
+
+# SLURM
+slurm-*.out
+slurm-*.err
+.sbatch
+
+# Python (if any Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Job files
+.last_job_id
+*.sbatch
+
+# Conda/packaging
+.conda/
+*.tar.bz2
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code
+.claude/
+.claude/cache/
+.claude/projects/
+
+# Documentation builds
+/docs/_build/
+/docs/site/
+
+# Coverage reports
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+
+# Profiling
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Compressed files (unless in testdata)
+*.gz
+*.bz2
+*.xz
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Large files (over 10MB)
+*.large
+# Keep specific test data that's needed
+!testdata/.gitkeep
+
+# Node modules (if any frontend)
+node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Caching
+.cache/
+*.cache
+
+# Lock files (keep Cargo.lock for libraries, ignore for binaries)
+# Uncomment if you want to ignore Cargo.lock:
+# Cargo.lock
+
+# Contributing guidelines might have local copies
+CONTRIBUTING_PROCESSES.md
+
+# Package manager
+.cargo/
+
+# Rust Analyzer
+rust-project.json
+
+# Debug files
+debug/
+debug.info
+
+# Test artifacts
+*.profraw
+*.profdata
+
+# Additional ignores specific to methrix-cli
+# Genome data (large files)
+testdata/genomes/*.fa
+testdata/genomes/*.fa.gz
+testdata/genomes/*.fai
+
+# CpG extracted data (can be regenerated)
+testdata/**/*_cpgs.ron
+
+# Output directories
+*/output/
+*/rust_output/
+*_output/
+
+# Logs from SLURM jobs
+logs/slurm-*

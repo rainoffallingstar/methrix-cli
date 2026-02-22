@@ -1,0 +1,61 @@
+[package]
+name = "methrix-cli"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance methylation data processor - Bismark to HDF5"
+authors = ["methrix contributors"]
+license = "MIT"
+repository = "https://github.com/CompEpigen/methrix"
+
+[[bin]]
+name = "methrix"
+path = "src/main.rs"
+
+[dependencies]
+# Error handling
+anyhow = "1.0"
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+console = "0.15"
+flate2 = "1.0"
+# HDF5
+hdf5 = "0.8"
+# Progress display
+indicatif = "0.17"
+lazy_static = "1.4"
+# File I/O
+memmap2 = "0.9"
+# Scientific computing
+ndarray = { version = "0.15", features = ["rayon"] }
+# FASTA processing
+needletail = "0.5"
+num-traits = "0.2"
+# Concurrency
+rayon = "1.8"
+# String processing
+regex = "1.10"
+# HTTP client (for genome downloads)
+reqwest = { version = "0.11", features = ["blocking"] }
+ron = "0.8"
+# Excel output
+rust_xlsxwriter = "0.57"
+# Data structures
+serde = { version = "1.0", features = ["derive"] }
+# Atomic writes
+tempfile = "3.8"
+thiserror = "1.0"
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+# Compression
+xz2 = "0.1"
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.8"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true
+codegen-units = 1
