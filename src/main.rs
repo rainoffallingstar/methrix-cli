@@ -4,7 +4,7 @@ use tracing::{info, Level};
 use tracing_subscriber::fmt;
 
 #[derive(Parser)]
-#[command(name = "methrix")]
+#[command(name = "methrix-cli")]
 #[command(about = "High-performance methylation data processor", long_about = None)]
 #[command(version)]
 #[command(author = "methrix contributors")]
