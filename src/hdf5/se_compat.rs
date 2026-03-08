@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
+use hdf5::types::{VarLenAscii, VarLenUnicode};
 use hdf5::{File, Group};
 use ndarray::Array2;
-use hdf5::types::{VarLenAscii, VarLenUnicode};
 
 pub struct SummarizedExperimentWriter {
     output_path: String,
@@ -50,7 +50,7 @@ impl SummarizedExperimentWriter {
         name: &str,
         data: &Array2<T>,
     ) -> Result<()> {
-        let (n_cpgs, n_samples) = data.dim();  // data is [n_cpgs, n_samples] in row-major
+        let (n_cpgs, n_samples) = data.dim(); // data is [n_cpgs, n_samples] in row-major
 
         // R/HDF5 uses column-major: matrix[cpg, sample]
         // We'll create HDF5 dataset with shape [n_samples, n_cpgs] in C layout
@@ -89,7 +89,8 @@ impl SummarizedExperimentWriter {
         group: &Group,
         cpg_locations: &[crate::genome::cpg::CpGSite],
     ) -> Result<()> {
-        let chr: Vec<VarLenAscii> = cpg_locations.iter()
+        let chr: Vec<VarLenAscii> = cpg_locations
+            .iter()
             .map(|cpg| VarLenAscii::from_ascii(&cpg.chr).unwrap())
             .collect();
         let start: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.start).collect();
@@ -128,7 +129,8 @@ impl SummarizedExperimentWriter {
 
     fn write_coldata(&self, group: &Group, sample_names: &[String]) -> Result<()> {
         // Convert to VarLenAscii
-        let names: Vec<VarLenAscii> = sample_names.iter()
+        let names: Vec<VarLenAscii> = sample_names
+            .iter()
             .map(|s| VarLenAscii::from_ascii(s).unwrap())
             .collect();
 

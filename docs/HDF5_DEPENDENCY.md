@@ -105,6 +105,20 @@ conda activate rust_build
 export HDF5_DIR=$CONDA_PREFIX
 ```
 
+### Ubuntu/Debian 系统包注意事项
+
+在 Ubuntu/Debian 上通过 `libhdf5-dev` 安装时，头文件通常位于 `/usr/include/hdf5/serial`，库位于 `/usr/lib/x86_64-linux-gnu/hdf5/serial`。
+
+这种布局下**不要**设置 `HDF5_DIR=/usr`（`hdf5-sys` 会检查 `/usr/include` 并报头文件目录无效）。
+
+请改用：
+
+```bash
+export HDF5_INCLUDE_DIR=/usr/include/hdf5/serial
+export HDF5_LIB_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial
+export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial/pkgconfig:${PKG_CONFIG_PATH:-}
+```
+
 ### 验证 HDF5 安装
 
 ```bash
