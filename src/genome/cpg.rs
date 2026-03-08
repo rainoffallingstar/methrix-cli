@@ -175,14 +175,31 @@ impl CpGExtractor {
     }
 
     fn extract_genome_name(&self) -> Result<String> {
-        // Infer genome version from FASTA path
-        // e.g.: hg19.fa -> hg19
+        // Infer genome version from FASTA path.
+        // e.g.: hg19.fa -> hg19, hg19.fa.gz -> hg19
         let path = std::path::Path::new(&self.fasta_path);
-        Ok(path
-            .file_stem()
+        let file_name = path
+            .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string())
+            .unwrap_or("unknown");
+
+        let mut name = file_name.to_string();
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with(".gz") {
+            name.truncate(name.len() - 3);
+        }
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with(".fasta") {
+            name.truncate(name.len() - 6);
+        } else if lower.ends_with(".fna") || lower.ends_with(".fa") {
+            name.truncate(name.len() - 3);
+        }
+
+        if name.is_empty() {
+            Ok("unknown".to_string())
+        } else {
+            Ok(name)
+        }
     }
 
     /// Save CpG data as RON format (for later use)

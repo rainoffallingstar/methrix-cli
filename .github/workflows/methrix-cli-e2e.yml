@@ -1,0 +1,76 @@
+name: methrix-cli-e2e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**"
+  pull_request:
+    paths:
+      - "**"
+      - ".github/workflows/methrix-cli-e2e.yml"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libhdf5-dev curl
+
+      - name: Configure HDF5 environment
+        run: |
+          set -euo pipefail
+          echo "HDF5_INCLUDE_DIR=/usr/include/hdf5/serial" >> "$GITHUB_ENV"
+          echo "HDF5_LIB_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          test -f /usr/include/hdf5/serial/hdf5.h
+          test -f /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.so
+          pkg-config --modversion hdf5 || pkg-config --modversion hdf5-serial
+
+      - name: Download hg19 FASTA from UCSC
+        run: |
+          set -euo pipefail
+          mkdir -p testdata/hg19_genome
+          curl -L --retry 5 --retry-delay 5 \
+            -o testdata/hg19_genome/hg19.fa.gz \
+            https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz
+          gzip -t testdata/hg19_genome/hg19.fa.gz
+          ls -lh testdata/hg19_genome/hg19.fa.gz
+
+      - name: Build methrix-cli
+        run: |
+          set -euo pipefail
+          cargo build --release
+          ./target/release/methrix --help | head -n 20
+
+      - name: E2E test with bundled testdata
+        run: |
+          set -euo pipefail
+          ./target/release/methrix process \
+            --input testdata \
+            --output testdata/output_e2e \
+            --genome testdata/hg19_genome/hg19.fa.gz \
+            --threads 4 \
+            --min-coverage 1 \
+            --remove-uncovered true
+
+          test -s testdata/output_e2e/assays.h5
+          test -s testdata/output_e2e/methrix_data.h5
+          test -s testdata/output_e2e/CpG_coverage.xlsx
+          ls -lh testdata/output_e2e
+
+      - name: QC report compatibility check
+        run: |
+          set -euo pipefail
+          ./target/release/methrix qc-report \
+            --input testdata/output_e2e \
+            --output testdata/output_e2e/CpG_coverage_qc_report.xlsx
+          test -s testdata/output_e2e/CpG_coverage_qc_report.xlsx

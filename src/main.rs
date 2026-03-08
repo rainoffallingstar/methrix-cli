@@ -25,7 +25,7 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Reference genome (hg19, hg38, mm10, mm39) or path to custom FASTA
+        /// Reference genome path (.ron, .fa/.fasta/.fna, optional .gz)
         #[arg(short, long)]
         genome: String,
 
@@ -47,8 +47,9 @@ enum Commands {
     },
 
     /// Extract CpG sites from reference genome
+    #[command(name = "extract-cpgs")]
     ExtractCpGs {
-        /// Genome FASTA file or built-in name (hg19, hg38, mm10, mm39)
+        /// Genome FASTA file path (.fa/.fasta/.fna, optional .gz)
         #[arg(short, long)]
         genome: String,
 
@@ -152,9 +153,7 @@ fn main() -> anyhow::Result<()> {
             cpg::extract_and_save(genome, output, contigs)
         }
 
-        Commands::DownloadGenome {
-            genome, output, ..
-        } => {
+        Commands::DownloadGenome { genome, output, .. } => {
             info!("Downloading genome: {}", genome);
             #[cfg(feature = "download")]
             {
@@ -162,7 +161,9 @@ fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "download"))]
             {
-                anyhow::bail!("Download feature not enabled. Please rebuild with --features download")
+                anyhow::bail!(
+                    "Download feature not enabled. Please rebuild with --features download"
+                )
             }
         }
 

@@ -33,7 +33,7 @@ impl MethrixProcessor {
         &self,
         files: Vec<String>,
         n_threads: usize,
-        _min_coverage: u16,
+        min_coverage: u16,
         remove_uncovered: bool,
     ) -> Result<MethrixData> {
         // Set up thread pool
@@ -50,20 +50,21 @@ impl MethrixProcessor {
         let mut cov_matrix = ndarray::Array2::<u16>::zeros((n_cpgs, n_samples));
 
         // Process files in parallel
-        let results: Vec<(usize, ProcessedSample)> = pool.install(|| {
-            files
-                .par_iter()
-                .enumerate()
-                .map(|(sample_idx, file_path)| {
-                    let sample = self
-                        .process_single_file(file_path)
-                        .with_context(|| format!("Failed to process {}", file_path))?;
-                    Ok::<(usize, ProcessedSample), anyhow::Error>((sample_idx, sample))
-                })
-                .collect::<Vec<Result<(usize, ProcessedSample)>>>()
-        })
-        .into_iter()
-        .collect::<Result<Vec<(usize, ProcessedSample)>>>()?;
+        let results: Vec<(usize, ProcessedSample)> = pool
+            .install(|| {
+                files
+                    .par_iter()
+                    .enumerate()
+                    .map(|(sample_idx, file_path)| {
+                        let sample = self
+                            .process_single_file(file_path, min_coverage)
+                            .with_context(|| format!("Failed to process {}", file_path))?;
+                        Ok::<(usize, ProcessedSample), anyhow::Error>((sample_idx, sample))
+                    })
+                    .collect::<Vec<Result<(usize, ProcessedSample)>>>()
+            })
+            .into_iter()
+            .collect::<Result<Vec<(usize, ProcessedSample)>>>()?;
 
         // Merge results
         for (sample_idx, sample) in results {
@@ -99,9 +100,10 @@ impl MethrixProcessor {
         })
     }
 
-    fn process_single_file(&self, file_path: &str) -> Result<ProcessedSample> {
+    fn process_single_file(&self, file_path: &str, min_coverage: u16) -> Result<ProcessedSample> {
         let reader = BismarkReader::new(file_path.to_string());
         let records = reader.read()?;
+        let min_coverage = min_coverage as u32;
 
         let n_cpgs = self.cpg_data.cpgs.len();
         let mut beta_values = vec![f32::NAN; n_cpgs];
@@ -113,7 +115,7 @@ impl MethrixProcessor {
             let start = record.start;
             if let Some(&idx) = self.cpg_index.get(&(chr, start)) {
                 let total = record.total_reads();
-                if total > 0 && idx < n_cpgs {
+                if total >= min_coverage && idx < n_cpgs {
                     coverage_values[idx] = total as u16;
                     beta_values[idx] = record.beta_value().unwrap();
                 }
@@ -162,13 +164,14 @@ pub fn run_pipeline(
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
     // Load or extract CpG data
-    let cpg_data = if genome.ends_with(".ron") {
+    let genome_lc = genome.to_ascii_lowercase();
+    let cpg_data = if genome_lc.ends_with(".ron") {
         // It's a pre-extracted RON file
         println!("Loading pre-extracted CpG data from: {}", genome);
         crate::genome::cpg::load_cpg_data(&genome)?
     } else if Path::new(&genome).exists() {
         // Check if it's actually a RON file or FASTA
-        if genome.ends_with(".fa") || genome.ends_with(".fasta") || genome.ends_with(".fna") {
+        if is_fasta_input(&genome) {
             // It's a FASTA file, need to extract CpGs
             println!("Extracting CpG sites from FASTA: {}", genome);
             let extractor = crate::genome::cpg::CpGExtractor::new(genome.clone());
@@ -185,10 +188,10 @@ pub fn run_pipeline(
             println!("Loading pre-extracted CpG data from: {}", ron_path);
             crate::genome::cpg::load_cpg_data(&ron_path)?
         } else {
-            // Try to use built-in genome name
+            // Provide actionable local file guidance.
             println!("Genome file not found: {}", genome);
             println!("Please either:");
-            println!("1. Provide a FASTA file path");
+            println!("1. Provide a FASTA file path (.fa/.fasta/.fna, optional .gz)");
             println!("2. Provide a pre-extracted .ron file path");
             println!(
                 "3. Run: methrix extract-cpgs --genome <fasta> --output {}.ron",
@@ -208,11 +211,19 @@ pub fn run_pipeline(
         processor.process_files_parallel(bismark_files, threads, min_coverage, remove_uncovered)?;
 
     // Write H5 file
-    let h5_path = Path::new(&output_dir).join("methrix_data.h5");
-    println!("Writing HDF5 file to: {}", h5_path.display());
+    let assays_h5_path = Path::new(&output_dir).join("assays.h5");
+    let compat_h5_path = Path::new(&output_dir).join("methrix_data.h5");
+    println!("Writing HDF5 file to: {}", assays_h5_path.display());
 
-    let writer = SummarizedExperimentWriter::new(h5_path.to_string_lossy().to_string());
+    let writer = SummarizedExperimentWriter::new(assays_h5_path.to_string_lossy().to_string());
     writer.write_methrix_object(&methrix_data)?;
+    // Keep legacy filename for compatibility with older scripts.
+    fs::copy(&assays_h5_path, &compat_h5_path).with_context(|| {
+        format!(
+            "Failed to create compatibility HDF5 copy: {}",
+            compat_h5_path.display()
+        )
+    })?;
 
     // Generate QC report
     let qc_path = Path::new(&output_dir).join("CpG_coverage.xlsx");
@@ -224,10 +235,21 @@ pub fn run_pipeline(
 
     println!("\nPipeline completed successfully!");
     println!("Output files:");
-    println!("  - HDF5: {}", h5_path.display());
+    println!("  - HDF5: {}", assays_h5_path.display());
+    println!("  - HDF5 (compat): {}", compat_h5_path.display());
     println!("  - QC Report: {}", qc_path.display());
 
     Ok(())
+}
+
+fn is_fasta_input(path: &str) -> bool {
+    let path_lc = path.to_ascii_lowercase();
+    path_lc.ends_with(".fa")
+        || path_lc.ends_with(".fasta")
+        || path_lc.ends_with(".fna")
+        || path_lc.ends_with(".fa.gz")
+        || path_lc.ends_with(".fasta.gz")
+        || path_lc.ends_with(".fna.gz")
 }
 
 fn find_bismark_files(dir: &str) -> Result<Vec<String>> {

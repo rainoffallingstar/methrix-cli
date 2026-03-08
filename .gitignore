@@ -28,10 +28,7 @@ Cargo.lock
 /tests/**/*.xlsx
 /tests/output/
 
-# Test data directories (ignore entire directories)
-# These directories contain large test files and reference data
-# that can be regenerated or downloaded as needed
-testdata/
+# Test reference code directory (large and optional)
 refer-code/
 
 # Logs
@@ -123,7 +120,10 @@ perf.data.old
 
 # Large files (over 10MB)
 *.large
-# Keep specific test data that's needed
+# Keep test data that's needed for CI/e2e
+!testdata/
+!testdata/**/*.md
+!testdata/**/*.cov.gz
 !testdata/.gitkeep
 
 # Node modules (if any frontend)
@@ -160,10 +160,14 @@ debug.info
 *.profdata
 
 # Additional ignores specific to methrix-cli
-# Genome data (large files)
-testdata/genomes/*.fa
-testdata/genomes/*.fa.gz
-testdata/genomes/*.fai
+# Genome FASTA data under testdata (still ignored; downloaded in CI)
+testdata/**/*.fa
+testdata/**/*.fasta
+testdata/**/*.fna
+testdata/**/*.fa.gz
+testdata/**/*.fasta.gz
+testdata/**/*.fna.gz
+testdata/**/*.fai
 
 # CpG extracted data (can be regenerated)
 testdata/**/*_cpgs.ron
