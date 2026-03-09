@@ -174,7 +174,6 @@ Excel file with coverage statistics:
 ### CpG annotation report
 
 `CpG_annotation_report.xlsx` (generated automatically by `methrix process`) contains:
-- `ChIPseeker_Summary` sheet: genomic annotation proportion
 - `ChIPseeker_By_Sample` sheet: per-sample genomic annotation counts and percentages
 - `CpG_Details` sheet: per-CpG genomic annotation fields (GTF-based)
 

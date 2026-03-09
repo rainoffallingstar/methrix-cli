@@ -134,68 +134,55 @@ pub struct AnnotationResult {
 pub struct SampleAnnotationRow {
     pub sample_name: String,
     pub covered_cpgs: usize,
-    pub annotation: String,
-    pub count: usize,
-    pub percent_of_covered: f64,
+    pub annotation_counts: BTreeMap<String, usize>,
 }
 
 impl AnnotationResult {
     pub fn write_excel_report(&self, output_path: &str) -> Result<()> {
         let mut workbook = Workbook::new();
 
-        let total = self.records.len() as f64;
-
-        let _sheet_genomic = workbook.add_worksheet();
-        let sheet_genomic = workbook
-            .worksheet_from_index(0)
-            .context("Failed to get genomic worksheet")?;
-        sheet_genomic.set_name("ChIPseeker_Summary")?;
-        sheet_genomic.write_string(0, 0, "Annotation")?;
-        sheet_genomic.write_string(0, 1, "Count")?;
-        sheet_genomic.write_string(0, 2, "Percent")?;
-
-        let mut ann_counts: BTreeMap<String, usize> = BTreeMap::new();
-        for rec in &self.records {
-            *ann_counts.entry(rec.annotation.clone()).or_insert(0) += 1;
-        }
-
-        for (row_idx, (ann, count)) in ann_counts.iter().enumerate() {
-            let row = (row_idx + 1) as u32;
-            let count_f = *count as f64;
-            let pct = if total > 0.0 {
-                count_f / total * 100.0
-            } else {
-                0.0
-            };
-
-            sheet_genomic.write_string(row, 0, ann)?;
-            sheet_genomic.write_number(row, 1, count_f)?;
-            sheet_genomic.write_number(row, 2, pct)?;
-        }
-
         let _sheet_by_sample = workbook.add_worksheet();
         let sheet_by_sample = workbook
-            .worksheet_from_index(1)
+            .worksheet_from_index(0)
             .context("Failed to get by-sample worksheet")?;
         sheet_by_sample.set_name("ChIPseeker_By_Sample")?;
+
+        let mut annotations: Vec<String> =
+            self.records.iter().map(|r| r.annotation.clone()).collect();
+        annotations.sort();
+        annotations.dedup();
+
         sheet_by_sample.write_string(0, 0, "sample")?;
         sheet_by_sample.write_string(0, 1, "covered_cpgs")?;
-        sheet_by_sample.write_string(0, 2, "annotation")?;
-        sheet_by_sample.write_string(0, 3, "count")?;
-        sheet_by_sample.write_string(0, 4, "percent_of_covered")?;
+        let mut col = 2u16;
+        for ann in &annotations {
+            sheet_by_sample.write_string(0, col, format!("{}_count", ann))?;
+            sheet_by_sample.write_string(0, col + 1, format!("{}_percent", ann))?;
+            col += 2;
+        }
 
-        for (idx, row_data) in self.sample_summary.iter().enumerate() {
+        for (idx, sample_row) in self.sample_summary.iter().enumerate() {
             let row = (idx + 1) as u32;
-            sheet_by_sample.write_string(row, 0, &row_data.sample_name)?;
-            sheet_by_sample.write_number(row, 1, row_data.covered_cpgs as f64)?;
-            sheet_by_sample.write_string(row, 2, &row_data.annotation)?;
-            sheet_by_sample.write_number(row, 3, row_data.count as f64)?;
-            sheet_by_sample.write_number(row, 4, row_data.percent_of_covered)?;
+            sheet_by_sample.write_string(row, 0, &sample_row.sample_name)?;
+            sheet_by_sample.write_number(row, 1, sample_row.covered_cpgs as f64)?;
+
+            let mut col = 2u16;
+            for ann in &annotations {
+                let count = *sample_row.annotation_counts.get(ann).unwrap_or(&0usize);
+                let pct = if sample_row.covered_cpgs > 0 {
+                    count as f64 * 100.0 / sample_row.covered_cpgs as f64
+                } else {
+                    0.0
+                };
+                sheet_by_sample.write_number(row, col, count as f64)?;
+                sheet_by_sample.write_number(row, col + 1, pct)?;
+                col += 2;
+            }
         }
 
         let _sheet_details = workbook.add_worksheet();
         let sheet_details = workbook
-            .worksheet_from_index(2)
+            .worksheet_from_index(1)
             .context("Failed to get details worksheet")?;
         sheet_details.set_name("CpG_Details")?;
 
@@ -279,38 +266,24 @@ fn calculate_sample_annotation_summary(
         return Vec::new();
     }
 
-    let mut annotations: Vec<String> = records.iter().map(|r| r.annotation.clone()).collect();
-    annotations.sort();
-    annotations.dedup();
-
     let mut rows = Vec::new();
     for (sample_idx, sample_name) in sample_names.iter().enumerate() {
-        let mut counts: HashMap<&str, usize> = HashMap::new();
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         let mut covered_cpgs = 0usize;
 
         for row_idx in 0..n_rows {
             if cov_matrix[(row_idx, sample_idx)] > 0 {
                 covered_cpgs += 1;
-                let ann = records[row_idx].annotation.as_str();
+                let ann = records[row_idx].annotation.clone();
                 *counts.entry(ann).or_insert(0) += 1;
             }
         }
 
-        for ann in &annotations {
-            let count = *counts.get(ann.as_str()).unwrap_or(&0);
-            let percent_of_covered = if covered_cpgs > 0 {
-                count as f64 * 100.0 / covered_cpgs as f64
-            } else {
-                0.0
-            };
-            rows.push(SampleAnnotationRow {
-                sample_name: sample_name.clone(),
-                covered_cpgs,
-                annotation: ann.clone(),
-                count,
-                percent_of_covered,
-            });
-        }
+        rows.push(SampleAnnotationRow {
+            sample_name: sample_name.clone(),
+            covered_cpgs,
+            annotation_counts: counts,
+        });
     }
 
     rows
@@ -877,28 +850,16 @@ mod tests {
         let sample_names = vec!["sample1".to_string(), "sample2".to_string()];
         let summary = calculate_sample_annotation_summary(&records, &cov, &sample_names);
 
-        let s1_promoter = summary
-            .iter()
-            .find(|r| r.sample_name == "sample1" && r.annotation == "Promoter")
-            .unwrap();
-        let s1_exon = summary
-            .iter()
-            .find(|r| r.sample_name == "sample1" && r.annotation == "Exon")
-            .unwrap();
-        assert_eq!(s1_promoter.covered_cpgs, 1);
-        assert_eq!(s1_promoter.count, 1);
-        assert_eq!(s1_exon.count, 0);
+        assert_eq!(summary.len(), 2);
 
-        let s2_promoter = summary
-            .iter()
-            .find(|r| r.sample_name == "sample2" && r.annotation == "Promoter")
-            .unwrap();
-        let s2_exon = summary
-            .iter()
-            .find(|r| r.sample_name == "sample2" && r.annotation == "Exon")
-            .unwrap();
-        assert_eq!(s2_exon.covered_cpgs, 1);
-        assert_eq!(s2_exon.count, 1);
-        assert_eq!(s2_promoter.count, 0);
+        let s1 = summary.iter().find(|r| r.sample_name == "sample1").unwrap();
+        assert_eq!(s1.covered_cpgs, 1);
+        assert_eq!(s1.annotation_counts.get("Promoter"), Some(&1usize));
+        assert_eq!(s1.annotation_counts.get("Exon"), None);
+
+        let s2 = summary.iter().find(|r| r.sample_name == "sample2").unwrap();
+        assert_eq!(s2.covered_cpgs, 1);
+        assert_eq!(s2.annotation_counts.get("Exon"), Some(&1usize));
+        assert_eq!(s2.annotation_counts.get("Promoter"), None);
     }
 }
