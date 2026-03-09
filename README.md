@@ -96,6 +96,8 @@ Options:
   -t, --threads <N>           Number of threads [default: CPU count]
       --min-coverage <N>       Minimum coverage [default: 1]
       --remove-uncovered      Remove uncovered loci [default: true]
+      --annotation-dir <DIR>  Annotation resources directory (e.g. hg19.gtf or hg19.gtf.gz)
+      --skip-annotation       Skip CpG annotation report generation
   -v, --verbose               Enable verbose logging
 ```
 
@@ -168,6 +170,12 @@ Excel file with coverage statistics:
 - Total CpGs
 - Covered CpGs
 - Coverage distribution (1X, 2X, 3X, 4X, 5X, 10X)
+
+### CpG annotation report
+
+`CpG_annotation_report.xlsx` (generated automatically by `methrix process`) contains:
+- `ChIPseeker_Summary` sheet: genomic annotation proportion
+- `CpG_Details` sheet: per-CpG genomic annotation fields (GTF-based)
 
 ## R integration
 

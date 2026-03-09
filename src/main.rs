@@ -41,6 +41,14 @@ enum Commands {
         #[arg(long, default_value = "true")]
         remove_uncovered: bool,
 
+        /// Directory containing gene annotation GTF (e.g. hg19.gtf or hg19.gtf.gz)
+        #[arg(long)]
+        annotation_dir: Option<String>,
+
+        /// Skip CpG annotation report generation
+        #[arg(long, default_value_t = false)]
+        skip_annotation: bool,
+
         /// Enable verbose logging
         #[arg(short, long)]
         verbose: bool,
@@ -123,6 +131,8 @@ fn main() -> anyhow::Result<()> {
             threads,
             min_coverage,
             remove_uncovered,
+            annotation_dir,
+            skip_annotation,
             ..
         } => {
             info!("Starting methrix processing pipeline");
@@ -132,6 +142,8 @@ fn main() -> anyhow::Result<()> {
             info!("Threads: {}", threads);
             info!("Min coverage: {}", min_coverage);
             info!("Remove uncovered: {}", remove_uncovered);
+            info!("Annotation dir: {:?}", annotation_dir);
+            info!("Skip annotation: {}", skip_annotation);
 
             process::run_pipeline(
                 input,
@@ -140,6 +152,8 @@ fn main() -> anyhow::Result<()> {
                 threads,
                 min_coverage,
                 remove_uncovered,
+                annotation_dir,
+                skip_annotation,
             )
         }
 

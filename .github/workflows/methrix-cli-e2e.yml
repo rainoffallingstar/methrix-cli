@@ -45,19 +45,30 @@ jobs:
           gzip -t testdata/hg19_genome/hg19.fa.gz
           ls -lh testdata/hg19_genome/hg19.fa.gz
 
+      - name: Download hg19 GTF for annotation test
+        run: |
+          set -euo pipefail
+          mkdir -p testdata/annotations
+          curl -fL --retry 5 --retry-delay 5 \
+            -o testdata/annotations/hg19.gtf.gz \
+            https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/genes/hg19.refGene.gtf.gz
+          gzip -t testdata/annotations/hg19.gtf.gz
+          ls -lh testdata/annotations/hg19.gtf.gz
+
       - name: Build methrix-cli
         run: |
           set -euo pipefail
           cargo build --release
           ./target/release/methrix --help | head -n 20
 
-      - name: E2E test with bundled testdata
+      - name: E2E test with GTF annotation
         run: |
           set -euo pipefail
           ./target/release/methrix process \
             --input testdata \
             --output testdata/output_e2e \
             --genome testdata/hg19_genome/hg19.fa.gz \
+            --annotation-dir testdata/annotations \
             --threads 4 \
             --min-coverage 1 \
             --remove-uncovered
@@ -65,6 +76,22 @@ jobs:
           test -s testdata/output_e2e/assays.h5
           test -s testdata/output_e2e/methrix_data.h5
           test -s testdata/output_e2e/CpG_coverage.xlsx
+          test -s testdata/output_e2e/CpG_annotation_report.xlsx
+
+          # Verify annotation report sheets (GTF-only mode)
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          report = Path("testdata/output_e2e/CpG_annotation_report.xlsx")
+          assert report.exists() and report.stat().st_size > 0, "annotation report missing"
+          with zipfile.ZipFile(report) as zf:
+            workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+          assert "ChIPseeker_Summary" in workbook_xml, "missing ChIPseeker_Summary sheet"
+          assert "CpG_Details" in workbook_xml, "missing CpG_Details sheet"
+          assert "CpG_Context" not in workbook_xml, "legacy CpG_Context sheet should not exist"
+          PY
+
           ls -lh testdata/output_e2e
 
       - name: QC report compatibility check
@@ -74,3 +101,15 @@ jobs:
             --input testdata/output_e2e \
             --output testdata/output_e2e/CpG_coverage_qc_report.xlsx
           test -s testdata/output_e2e/CpG_coverage_qc_report.xlsx
+
+      - name: Upload QC Excel artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: methrix-qc-excel-${{ github.run_id }}
+          path: |
+            testdata/output_e2e/CpG_coverage.xlsx
+            testdata/output_e2e/CpG_coverage_qc_report.xlsx
+            testdata/output_e2e/CpG_annotation_report.xlsx
+          if-no-files-found: error
+          retention-days: 14

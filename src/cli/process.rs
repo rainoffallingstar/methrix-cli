@@ -159,6 +159,8 @@ pub fn run_pipeline(
     threads: usize,
     min_coverage: u16,
     remove_uncovered: bool,
+    annotation_dir: Option<String>,
+    skip_annotation: bool,
 ) -> Result<()> {
     // Create output directory
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
@@ -233,11 +235,36 @@ pub fn run_pipeline(
         stats::calculate_coverage_stats(&methrix_data.cov_matrix, &methrix_data.sample_names);
     crate::qc::report::generate_coverage_report(qc_path.to_str().unwrap(), &sample_stats)?;
 
+    if skip_annotation {
+        println!("Skipping CpG annotation report (--skip-annotation)");
+    } else {
+        let annotation_path = Path::new(&output_dir).join("CpG_annotation_report.xlsx");
+        println!(
+            "Generating CpG annotation report: {}",
+            annotation_path.display()
+        );
+
+        let annotation_result = crate::annotation::annotate_cpgs(
+            &methrix_data.cpg_locations,
+            &methrix_data.genome,
+            annotation_dir.as_deref(),
+        )?;
+        annotation_result.write_excel_report(annotation_path.to_str().unwrap())?;
+    }
+
     println!("\nPipeline completed successfully!");
     println!("Output files:");
     println!("  - HDF5: {}", assays_h5_path.display());
     println!("  - HDF5 (compat): {}", compat_h5_path.display());
     println!("  - QC Report: {}", qc_path.display());
+    if !skip_annotation {
+        println!(
+            "  - Annotation Report: {}",
+            Path::new(&output_dir)
+                .join("CpG_annotation_report.xlsx")
+                .display()
+        );
+    }
 
     Ok(())
 }

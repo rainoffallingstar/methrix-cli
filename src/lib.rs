@@ -1,3 +1,4 @@
+pub mod annotation;
 pub mod bismark;
 pub mod cli;
 pub mod genome;
