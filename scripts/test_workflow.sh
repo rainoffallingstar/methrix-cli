@@ -60,7 +60,7 @@ $BINARY process \
     --genome "$GENOME_ARG" \
     --threads 8 \
     --min-coverage 1 \
-    --remove-uncovered true
+    --remove-uncovered
 
 echo ""
 echo -e "${GREEN}=== Pipeline completed successfully! ===${NC}"

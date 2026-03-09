@@ -60,7 +60,7 @@ jobs:
             --genome testdata/hg19_genome/hg19.fa.gz \
             --threads 4 \
             --min-coverage 1 \
-            --remove-uncovered true
+            --remove-uncovered
 
           test -s testdata/output_e2e/assays.h5
           test -s testdata/output_e2e/methrix_data.h5
