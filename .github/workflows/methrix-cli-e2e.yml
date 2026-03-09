@@ -99,8 +99,8 @@ jobs:
           set -euo pipefail
           ./target/release/methrix qc-report \
             --input testdata/output_e2e \
-            --output testdata/output_e2e/CpG_coverage_qc_report.xlsx
-          test -s testdata/output_e2e/CpG_coverage_qc_report.xlsx
+            --output testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
+          test -s testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
 
       - name: Upload QC Excel artifacts
         if: always()
@@ -109,7 +109,7 @@ jobs:
           name: methrix-qc-excel-${{ github.run_id }}
           path: |
             testdata/output_e2e/CpG_coverage.xlsx
-            testdata/output_e2e/CpG_coverage_qc_report.xlsx
+            testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
             testdata/output_e2e/CpG_annotation_report.xlsx
           if-no-files-found: error
           retention-days: 14

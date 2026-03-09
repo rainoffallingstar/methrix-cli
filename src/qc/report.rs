@@ -80,21 +80,6 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
         }
     };
 
-    let cov_matrix: Vec<u16> = cov_dataset
-        .read_raw()
-        .context("Failed to read coverage data")?;
-
-    // Get dimensions from the dataset
-    let cov_space = cov_dataset.space().context("Failed to get dataspace")?;
-    let shape = cov_space.shape();
-    let n_cpgs = shape[0];
-    let n_samples = shape[1];
-
-    // Convert to 2D structure (column-major: samples are columns)
-    let matrix_2d: Vec<Vec<u16>> = (0..n_samples)
-        .map(|i| (0..n_cpgs).map(|j| cov_matrix[j + i * n_cpgs]).collect())
-        .collect();
-
     // Get sample names from colData
     let coldata_group = file
         .group("colData")
@@ -112,10 +97,94 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
         .map(|s: &hdf5::types::VarLenAscii| s.to_string())
         .collect();
 
+    let cov_matrix: Vec<u16> = cov_dataset
+        .read_raw()
+        .context("Failed to read coverage data")?;
+
+    // Get dimensions from the dataset
+    let cov_space = cov_dataset.space().context("Failed to get dataspace")?;
+    let shape = cov_space.shape();
+
+    // Convert coverage data into sample-major vectors, robust to both:
+    // 1) [n_samples, n_cpgs] (current writer layout)
+    // 2) [n_cpgs, n_samples] (legacy/alternative layout)
+    let matrix_2d = reshape_cov_by_sample(&cov_matrix, &shape, sample_names.len())?;
+
     // Calculate stats
     let stats =
         crate::processing::stats::calculate_coverage_stats_from_vec(&matrix_2d, &sample_names);
 
     // Generate report
     generate_coverage_report(output_path, &stats)
+}
+
+fn reshape_cov_by_sample(raw: &[u16], shape: &[usize], n_samples: usize) -> Result<Vec<Vec<u16>>> {
+    if shape.len() != 2 {
+        anyhow::bail!("Expected 2D coverage matrix, got shape {:?}", shape);
+    }
+
+    let dim0 = shape[0];
+    let dim1 = shape[1];
+    let expected_len = dim0.checked_mul(dim1).context("Coverage shape overflow")?;
+    if raw.len() != expected_len {
+        anyhow::bail!(
+            "Coverage raw length mismatch: got {}, expected {} (shape {:?})",
+            raw.len(),
+            expected_len,
+            shape
+        );
+    }
+
+    if dim0 == n_samples {
+        // Stored as [samples, cpgs] in row-major.
+        let n_cpgs = dim1;
+        let mut out = Vec::with_capacity(n_samples);
+        for sample_idx in 0..n_samples {
+            let start = sample_idx * n_cpgs;
+            out.push(raw[start..start + n_cpgs].to_vec());
+        }
+        return Ok(out);
+    }
+
+    if dim1 == n_samples {
+        // Stored as [cpgs, samples] in row-major.
+        let n_cpgs = dim0;
+        let mut out = vec![vec![0u16; n_cpgs]; n_samples];
+        for cpg_idx in 0..n_cpgs {
+            let row_start = cpg_idx * n_samples;
+            for sample_idx in 0..n_samples {
+                out[sample_idx][cpg_idx] = raw[row_start + sample_idx];
+            }
+        }
+        return Ok(out);
+    }
+
+    anyhow::bail!(
+        "Coverage shape {:?} does not match sample count {}",
+        shape,
+        n_samples
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reshape_cov_by_sample;
+
+    #[test]
+    fn reshape_samples_by_cpgs_layout() {
+        // [samples=2, cpgs=3]
+        let raw = vec![1u16, 0, 5, 2, 3, 0];
+        let shape = vec![2usize, 3usize];
+        let out = reshape_cov_by_sample(&raw, &shape, 2).unwrap();
+        assert_eq!(out, vec![vec![1, 0, 5], vec![2, 3, 0]]);
+    }
+
+    #[test]
+    fn reshape_cpgs_by_samples_layout() {
+        // [cpgs=3, samples=2]
+        let raw = vec![1u16, 2, 0, 3, 5, 0];
+        let shape = vec![3usize, 2usize];
+        let out = reshape_cov_by_sample(&raw, &shape, 2).unwrap();
+        assert_eq!(out, vec![vec![1, 0, 5], vec![2, 3, 0]]);
+    }
 }

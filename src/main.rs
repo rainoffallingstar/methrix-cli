@@ -89,7 +89,7 @@ enum Commands {
         verbose: bool,
     },
 
-    /// Generate QC report from existing methrix H5 object
+    /// Regenerate coverage-only QC report from existing methrix H5 object
     QCReport {
         /// Input directory containing methrix H5 object
         #[arg(short, long)]

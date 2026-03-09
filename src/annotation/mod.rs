@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
+use ndarray::Array2;
 use rust_xlsxwriter::Workbook;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
@@ -126,6 +127,16 @@ pub struct AnnotationRecord {
 #[derive(Debug, Clone)]
 pub struct AnnotationResult {
     pub records: Vec<AnnotationRecord>,
+    pub sample_summary: Vec<SampleAnnotationRow>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SampleAnnotationRow {
+    pub sample_name: String,
+    pub covered_cpgs: usize,
+    pub annotation: String,
+    pub count: usize,
+    pub percent_of_covered: f64,
 }
 
 impl AnnotationResult {
@@ -162,9 +173,29 @@ impl AnnotationResult {
             sheet_genomic.write_number(row, 2, pct)?;
         }
 
+        let _sheet_by_sample = workbook.add_worksheet();
+        let sheet_by_sample = workbook
+            .worksheet_from_index(1)
+            .context("Failed to get by-sample worksheet")?;
+        sheet_by_sample.set_name("ChIPseeker_By_Sample")?;
+        sheet_by_sample.write_string(0, 0, "sample")?;
+        sheet_by_sample.write_string(0, 1, "covered_cpgs")?;
+        sheet_by_sample.write_string(0, 2, "annotation")?;
+        sheet_by_sample.write_string(0, 3, "count")?;
+        sheet_by_sample.write_string(0, 4, "percent_of_covered")?;
+
+        for (idx, row_data) in self.sample_summary.iter().enumerate() {
+            let row = (idx + 1) as u32;
+            sheet_by_sample.write_string(row, 0, &row_data.sample_name)?;
+            sheet_by_sample.write_number(row, 1, row_data.covered_cpgs as f64)?;
+            sheet_by_sample.write_string(row, 2, &row_data.annotation)?;
+            sheet_by_sample.write_number(row, 3, row_data.count as f64)?;
+            sheet_by_sample.write_number(row, 4, row_data.percent_of_covered)?;
+        }
+
         let _sheet_details = workbook.add_worksheet();
         let sheet_details = workbook
-            .worksheet_from_index(1)
+            .worksheet_from_index(2)
             .context("Failed to get details worksheet")?;
         sheet_details.set_name("CpG_Details")?;
 
@@ -205,6 +236,8 @@ impl AnnotationResult {
 
 pub fn annotate_cpgs(
     cpg_sites: &[CpGSite],
+    cov_matrix: &Array2<u16>,
+    sample_names: &[String],
     genome: &str,
     annotation_dir: Option<&str>,
 ) -> Result<AnnotationResult> {
@@ -228,7 +261,59 @@ pub fn annotate_cpgs(
         });
     }
 
-    Ok(AnnotationResult { records })
+    let sample_summary = calculate_sample_annotation_summary(&records, cov_matrix, sample_names);
+
+    Ok(AnnotationResult {
+        records,
+        sample_summary,
+    })
+}
+
+fn calculate_sample_annotation_summary(
+    records: &[AnnotationRecord],
+    cov_matrix: &Array2<u16>,
+    sample_names: &[String],
+) -> Vec<SampleAnnotationRow> {
+    let (n_rows, n_samples) = cov_matrix.dim();
+    if n_rows != records.len() || n_samples != sample_names.len() {
+        return Vec::new();
+    }
+
+    let mut annotations: Vec<String> = records.iter().map(|r| r.annotation.clone()).collect();
+    annotations.sort();
+    annotations.dedup();
+
+    let mut rows = Vec::new();
+    for (sample_idx, sample_name) in sample_names.iter().enumerate() {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        let mut covered_cpgs = 0usize;
+
+        for row_idx in 0..n_rows {
+            if cov_matrix[(row_idx, sample_idx)] > 0 {
+                covered_cpgs += 1;
+                let ann = records[row_idx].annotation.as_str();
+                *counts.entry(ann).or_insert(0) += 1;
+            }
+        }
+
+        for ann in &annotations {
+            let count = *counts.get(ann.as_str()).unwrap_or(&0);
+            let percent_of_covered = if covered_cpgs > 0 {
+                count as f64 * 100.0 / covered_cpgs as f64
+            } else {
+                0.0
+            };
+            rows.push(SampleAnnotationRow {
+                sample_name: sample_name.clone(),
+                covered_cpgs,
+                annotation: ann.clone(),
+                count,
+                percent_of_covered,
+            });
+        }
+    }
+
+    rows
 }
 
 fn load_annotation_resources(
@@ -752,5 +837,68 @@ mod tests {
                 .contains("Annotation requires --annotation-dir"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn sample_annotation_summary_is_coverage_aware() {
+        let records = vec![
+            AnnotationRecord {
+                chr: "chr1".to_string(),
+                start_1based: 101,
+                end_1based: 102,
+                strand: '+',
+                annotation: "Promoter".to_string(),
+                gene_id: "g1".to_string(),
+                gene_symbol: "G1".to_string(),
+                transcript_id: "tx1".to_string(),
+                distance_to_tss: 0,
+                exon_intron_rank: "".to_string(),
+            },
+            AnnotationRecord {
+                chr: "chr1".to_string(),
+                start_1based: 201,
+                end_1based: 202,
+                strand: '+',
+                annotation: "Exon".to_string(),
+                gene_id: "g1".to_string(),
+                gene_symbol: "G1".to_string(),
+                transcript_id: "tx1".to_string(),
+                distance_to_tss: 100,
+                exon_intron_rank: "Exon 1 of 1".to_string(),
+            },
+        ];
+
+        let mut cov = Array2::<u16>::zeros((2, 2));
+        cov[(0, 0)] = 5; // sample1 covers promoter
+        cov[(1, 0)] = 0; // sample1 does not cover exon
+        cov[(0, 1)] = 0; // sample2 does not cover promoter
+        cov[(1, 1)] = 7; // sample2 covers exon
+
+        let sample_names = vec!["sample1".to_string(), "sample2".to_string()];
+        let summary = calculate_sample_annotation_summary(&records, &cov, &sample_names);
+
+        let s1_promoter = summary
+            .iter()
+            .find(|r| r.sample_name == "sample1" && r.annotation == "Promoter")
+            .unwrap();
+        let s1_exon = summary
+            .iter()
+            .find(|r| r.sample_name == "sample1" && r.annotation == "Exon")
+            .unwrap();
+        assert_eq!(s1_promoter.covered_cpgs, 1);
+        assert_eq!(s1_promoter.count, 1);
+        assert_eq!(s1_exon.count, 0);
+
+        let s2_promoter = summary
+            .iter()
+            .find(|r| r.sample_name == "sample2" && r.annotation == "Promoter")
+            .unwrap();
+        let s2_exon = summary
+            .iter()
+            .find(|r| r.sample_name == "sample2" && r.annotation == "Exon")
+            .unwrap();
+        assert_eq!(s2_exon.covered_cpgs, 1);
+        assert_eq!(s2_exon.count, 1);
+        assert_eq!(s2_promoter.count, 0);
     }
 }

@@ -246,6 +246,8 @@ pub fn run_pipeline(
 
         let annotation_result = crate::annotation::annotate_cpgs(
             &methrix_data.cpg_locations,
+            &methrix_data.cov_matrix,
+            &methrix_data.sample_names,
             &methrix_data.genome,
             annotation_dir.as_deref(),
         )?;
