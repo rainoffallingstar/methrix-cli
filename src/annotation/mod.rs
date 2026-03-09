@@ -294,14 +294,20 @@ fn load_annotation_resources(
     annotation_dir: Option<&str>,
 ) -> Result<AnnotationResources> {
     let genome_key = normalize_genome_name(genome);
-    let dir = annotation_dir.context(
-        "Annotation requires --annotation-dir with a matching <genome>.gtf or <genome>.gtf.gz file",
-    )?;
-    let dir_path = Path::new(dir);
+    let inferred_dir = Path::new(genome)
+        .parent()
+        .and_then(|p| p.to_str())
+        .map(|s| s.to_string());
+    let dir = annotation_dir
+        .map(|s| s.to_string())
+        .or(inferred_dir)
+        .context(
+            "Annotation requires a GTF directory: pass --annotation-dir or provide --genome with a parent directory",
+        )?;
+    let dir_path = Path::new(&dir);
     let gtf_path = find_gtf_path(dir_path, &genome_key).with_context(|| {
         format!(
-            "Expected {}.gtf or {}.gtf.gz in annotation dir {}",
-            genome_key,
+            "Expected {}.gtf/.gtf.gz or a detectable *.gtf(.gz) in {}",
             genome_key,
             dir_path.display()
         )
@@ -324,7 +330,32 @@ fn find_gtf_path(dir: &Path, genome_key: &str) -> Result<PathBuf> {
         return Ok(gz);
     }
 
-    anyhow::bail!("GTF file not found")
+    // Fallback: if there's exactly one *.gtf or *.gtf.gz in dir, use it.
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| {
+            let lower = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            lower.ends_with(".gtf") || lower.ends_with(".gtf.gz")
+        })
+        .collect();
+    candidates.sort();
+
+    match candidates.len() {
+        1 => Ok(candidates.remove(0)),
+        0 => anyhow::bail!("GTF file not found"),
+        _ => anyhow::bail!(
+            "Multiple GTF candidates found; please specify --annotation-dir containing a unique target: {}",
+            candidates
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 fn normalize_genome_name(genome: &str) -> String {
