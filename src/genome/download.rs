@@ -1,3 +1,4 @@
+#[cfg(feature = "download")]
 use std::path::Path;
 
 /// Download genome from UCSC.
