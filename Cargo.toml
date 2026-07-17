@@ -23,8 +23,9 @@ anyhow = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 console = "0.15"
 flate2 = "1.0"
-# HDF5
-hdf5 = { version = "0.8", optional = true }
+# HDF5 (wraps hdf5-sys; static linking gated via direct hdf5-sys dep)
+hdf5 = "0.8"
+hdf5-sys = "0.8"
 hdf5-pure = { version = "0.1", optional = true }
 # Progress display
 indicatif = "0.17"
@@ -67,8 +68,7 @@ lto = true
 codegen-units = 1
 
 [features]
-default = ["hdf5-dynamic"]
+default = []
 download = ["reqwest"]
-hdf5-dynamic = ["hdf5"]
-hdf5-static = ["hdf5/static"]
+hdf5-static = ["hdf5-sys/static"]
 hdf5-pure = ["dep:hdf5-pure"]
