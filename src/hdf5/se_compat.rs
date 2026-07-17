@@ -77,7 +77,7 @@ impl SummarizedExperimentWriter {
         // Pass by value: ArrayBase<OwnedRepr<T>, Ix2> implements Into<ArrayView>.
         let builder = group.new_dataset_builder();
         let _dataset = builder
-            .with_data(reshaped)
+            .with_data(&reshaped)
             .deflate(6)
             .create(name)
             .context("Failed to create dataset")?;
