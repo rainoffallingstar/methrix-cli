@@ -3,8 +3,11 @@ use std::fs::File;
 use std::io::copy;
 use std::path::Path;
 
-/// Download genome from UCSC
+/// Download genome from UCSC.
+/// Enabled via `cargo build --features download`.
+#[cfg(feature = "download")]
 pub fn download_genome(genome: &str, output_dir: &str) -> Result<String> {
+    use reqwest::blocking::get;
     let url =
         get_genome_url(genome).ok_or_else(|| anyhow::anyhow!("Unknown genome: {}", genome))?;
 
