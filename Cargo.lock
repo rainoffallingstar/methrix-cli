@@ -613,6 +613,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e8dfed88a20aca1e594f0e2e2f2c9115e0812ba20bbea1ef7c99e0142dc84b9"
 dependencies = [
  "cmake",
+ "libz-sys",
 ]
 
 [[package]]
@@ -624,6 +625,7 @@ dependencies = [
  "hdf5-metno-src",
  "libc",
  "libloading",
+ "libz-sys",
  "parking_lot",
  "pkg-config",
  "regex",
@@ -919,6 +921,18 @@ checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
 dependencies = [
  "cfg-if",
  "windows-link",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
