@@ -7,9 +7,10 @@ authors = ["methrix contributors"]
 license = "MIT"
 repository = "https://github.com/rainoffallingstar/methrix-cli"
 
-# Note: HDF5 dynamic linking requires system libhdf5-dev.
-# This crate cannot be statically linked with musl.
-# Install via: apt-get install libhdf5-dev or conda install hdf5
+# HDF5 linking:
+#   hdf5-dynamic (default for local dev): links system libhdf5
+#   hdf5-static  (CI/release): compiles libhdf5 via CMake for fully static binary
+#   hdf5-pure    (future): pure-Rust HDF5, no C deps, not yet production-ready
 
 [[bin]]
 name = "methrix"
@@ -24,6 +25,7 @@ console = "0.15"
 flate2 = "1.0"
 # HDF5
 hdf5 = "0.8"
+hdf5-pure = { version = "0.1", optional = true }
 # Progress display
 indicatif = "0.17"
 lazy_static = "1.4"
@@ -65,5 +67,8 @@ lto = true
 codegen-units = 1
 
 [features]
-default = []
+default = ["hdf5-dynamic"]
 download = ["reqwest"]
+hdf5-dynamic = ["hdf5"]
+hdf5-static = ["hdf5/static"]
+hdf5-pure = ["dep:hdf5-pure"]
