@@ -76,7 +76,7 @@ impl SummarizedExperimentWriter {
         // Write the 2D array - it's contiguous in C layout
         let builder = group.new_dataset_builder();
         let _dataset = builder
-            .with_data(&reshaped)
+            .with_data(reshaped.view())
             .deflate(6)
             .create(name)
             .context("Failed to create dataset")?;
