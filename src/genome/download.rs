@@ -1,13 +1,13 @@
-use anyhow::{Context, Result};
-use std::fs::File;
-use std::io::copy;
 use std::path::Path;
 
 /// Download genome from UCSC.
 /// Enabled via `cargo build --features download`.
 #[cfg(feature = "download")]
-pub fn download_genome(genome: &str, output_dir: &str) -> Result<String> {
-    use reqwest::blocking::get;
+pub fn download_genome(genome: &str, output_dir: &str) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use std::fs::File;
+    use std::io::copy;
+
     let url =
         get_genome_url(genome).ok_or_else(|| anyhow::anyhow!("Unknown genome: {}", genome))?;
 
@@ -15,7 +15,6 @@ pub fn download_genome(genome: &str, output_dir: &str) -> Result<String> {
 
     let output_path = Path::new(output_dir).join(format!("{}.fa", genome));
 
-    // Download and decompress (if URL points to .gz file)
     if url.ends_with(".gz") {
         download_and_decompress(url, &output_path)?;
     } else {
@@ -36,8 +35,13 @@ fn get_genome_url(genome: &str) -> Option<&'static str> {
     }
 }
 
-fn download_and_decompress(url: &str, output_path: &Path) -> Result<()> {
+#[cfg(feature = "download")]
+fn download_and_decompress(url: &str, output_path: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
     use flate2::read::GzDecoder;
+    use std::fs::File;
+    use std::io::copy;
+
     let response = reqwest::blocking::get(url).context("Failed to download genome")?;
 
     if !response.status().is_success() {
@@ -52,7 +56,12 @@ fn download_and_decompress(url: &str, output_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn download_file(url: &str, output_path: &Path) -> Result<()> {
+#[cfg(feature = "download")]
+fn download_file(url: &str, output_path: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use std::fs::File;
+    use std::io::copy;
+
     let response = reqwest::blocking::get(url).context("Failed to download file")?;
 
     if !response.status().is_success() {
