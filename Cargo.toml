@@ -39,7 +39,7 @@ rayon = "1.8"
 # String processing
 regex = "1.10"
 # HTTP client (for genome downloads)
-reqwest = { version = "0.11", features = ["blocking"] }
+reqwest = { version = "0.11", features = ["blocking"], optional = true }
 ron = "0.8"
 # Excel output
 rust_xlsxwriter = "0.57"
