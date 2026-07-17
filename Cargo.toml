@@ -29,7 +29,7 @@ hdf5-pure = { version = "0.1", optional = true }
 # File I/O
 memmap2 = "0.9"
 # Scientific computing (pinned to match hdf5-metno minimum ndarray version)
-ndarray = { version = "0.16", features = ["rayon"] }
+ndarray = { version = "0.17", features = ["rayon"] }
 # FASTA processing
 needletail = "0.5"
 num-traits = "0.2"
