@@ -74,10 +74,10 @@ impl SummarizedExperimentWriter {
             .context("Failed to reshape assay data")?;
 
         // Write the 2D array - it's contiguous in C layout.
-        // Pass by value: ArrayBase<OwnedRepr<T>, Ix2> implements Into<ArrayView>.
+        // Use .view() to get ArrayView2<T> which pins D=Ix2 for type inference.
         let builder = group.new_dataset_builder();
         let _dataset = builder
-            .with_data(&reshaped)
+            .with_data(reshaped.view())
             .deflate(6)
             .create(name)
             .context("Failed to create dataset")?;
