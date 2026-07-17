@@ -23,8 +23,8 @@ impl SeparatedString for usize {
 /// Remove uncovered loci - ported from R::remove_uncovered
 /// Returns (filtered_beta, filtered_cov, covered_indices)
 pub fn remove_uncovered(
-    mut beta_matrix: Array2<f32>,
-    mut cov_matrix: Array2<u16>,
+    beta_matrix: Array2<f32>,
+    cov_matrix: Array2<u16>,
 ) -> Result<(Array2<f32>, Array2<u16>, Vec<usize>), anyhow::Error> {
     let (n_cpgs, n_samples) = cov_matrix.dim();
 

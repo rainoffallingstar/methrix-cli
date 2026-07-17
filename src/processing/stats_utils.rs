@@ -1,5 +1,3 @@
-use ndarray::Array2;
-
 /// Calculate coverage statistics from vector representation
 pub fn calculate_coverage_stats_from_vec(
     cov_matrix: &[Vec<u16>],

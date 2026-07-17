@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::bismark::{BismarkReader, BismarkRecord};
+use crate::bismark::BismarkReader;
 use crate::genome::cpg::{CpGData, CpGSite};
 use crate::hdf5::se_compat::SummarizedExperimentWriter;
 use crate::processing::{filter, stats};

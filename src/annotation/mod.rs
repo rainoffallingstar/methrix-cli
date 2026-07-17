@@ -640,7 +640,7 @@ fn annotate_genomic_feature(genes: &GeneAnnotations, chr: &str, pos: u32) -> Fea
         let distance_to_tss = signed_distance_to_tss(pos, tx.tss, tx.strand);
         let abs_dist = distance_to_tss.unsigned_abs();
 
-        let mut update_nearest = |current: &mut Option<FeatureHit>| {
+        let update_nearest = |current: &mut Option<FeatureHit>| {
             let candidate = FeatureHit {
                 annotation: GenomicAnnotation::Intergenic,
                 gene_id: tx.gene_id.clone(),

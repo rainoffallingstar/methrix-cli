@@ -1,9 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use memmap2::Mmap;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct BismarkRecord {
