@@ -73,10 +73,11 @@ impl SummarizedExperimentWriter {
         let reshaped = Array2::from_shape_vec((n_samples, n_cpgs), col_major_data)
             .context("Failed to reshape assay data")?;
 
-        // Write the 2D array - it's contiguous in C layout
+        // Write the 2D array - it's contiguous in C layout.
+        // Pass by value: ArrayBase<OwnedRepr<T>, Ix2> implements Into<ArrayView>.
         let builder = group.new_dataset_builder();
         let _dataset = builder
-            .with_data(&reshaped)
+            .with_data(reshaped)
             .deflate(6)
             .create(name)
             .context("Failed to create dataset")?;
