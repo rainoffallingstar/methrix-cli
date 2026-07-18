@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -15,28 +15,42 @@ pub struct MethrixProcessor {
 }
 
 impl MethrixProcessor {
-    pub fn new(cpg_data: CpGData) -> Self {
-        // Build CpG index - similar to R's data.table::setkey
+    pub fn new(cpg_data: CpGData) -> Result<Self> {
         let mut cpg_index = HashMap::new();
-        for (idx, cpg) in cpg_data.cpgs.iter().enumerate() {
-            cpg_index.insert((cpg.chr.clone(), cpg.start), idx);
+        for (cpg_index_value, cpg) in cpg_data.cpgs.iter().enumerate() {
+            let key = (canonical_contig_name(&cpg.chr), cpg.start);
+            if let Some(existing_index) = cpg_index.insert(key.clone(), cpg_index_value) {
+                bail!(
+                    "Reference CpG data contains duplicate canonical key {}:{} at indices {} and {}",
+                    key.0,
+                    key.1,
+                    existing_index,
+                    cpg_index_value
+                );
+            }
         }
 
-        Self {
+        Ok(Self {
             cpg_data,
             cpg_index,
-        }
+        })
     }
 
-    /// Process multiple Bismark files in parallel - ported from R::vect_code_batch
     pub fn process_files_parallel(
         &self,
         files: Vec<String>,
         n_threads: usize,
-        min_coverage: u16,
+        min_coverage: u32,
         remove_uncovered: bool,
     ) -> Result<MethrixData> {
-        // Set up thread pool
+        if files.is_empty() {
+            bail!("No Bismark coverage files were provided");
+        }
+        if n_threads == 0 {
+            bail!("Thread count must be at least 1");
+        }
+
+        let sample_names = normalized_sample_names(&files)?;
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(n_threads)
             .build()
@@ -44,82 +58,109 @@ impl MethrixProcessor {
 
         let n_cpgs = self.cpg_data.cpgs.len();
         let n_samples = files.len();
+        let mut beta_matrix = ndarray::Array2::<f32>::from_elem((n_cpgs, n_samples), f32::NAN);
+        let mut cov_matrix = ndarray::Array2::<u32>::zeros((n_cpgs, n_samples));
 
-        // Initialize matrices
-        let mut beta_matrix = ndarray::Array2::<f32>::zeros((n_cpgs, n_samples));
-        let mut cov_matrix = ndarray::Array2::<u16>::zeros((n_cpgs, n_samples));
-
-        // Process files in parallel
         let results: Vec<(usize, ProcessedSample)> = pool
             .install(|| {
                 files
                     .par_iter()
                     .enumerate()
-                    .map(|(sample_idx, file_path)| {
+                    .map(|(sample_index, file_path)| {
                         let sample = self
                             .process_single_file(file_path, min_coverage)
                             .with_context(|| format!("Failed to process {}", file_path))?;
-                        Ok::<(usize, ProcessedSample), anyhow::Error>((sample_idx, sample))
+                        Ok::<(usize, ProcessedSample), anyhow::Error>((sample_index, sample))
                     })
                     .collect::<Vec<Result<(usize, ProcessedSample)>>>()
             })
             .into_iter()
             .collect::<Result<Vec<(usize, ProcessedSample)>>>()?;
 
-        // Merge results
-        for (sample_idx, sample) in results {
+        for (sample_index, sample) in results {
             beta_matrix
-                .column_mut(sample_idx)
+                .column_mut(sample_index)
                 .assign(&ndarray::Array1::from(sample.beta_values));
             cov_matrix
-                .column_mut(sample_idx)
+                .column_mut(sample_index)
                 .assign(&ndarray::Array1::from(sample.coverage_values));
         }
 
-        // Apply filters
         let (beta_matrix, cov_matrix, covered_indices) = if remove_uncovered {
             filter::remove_uncovered(beta_matrix, cov_matrix)?
         } else {
-            // If not filtering, keep all indices
             let indices = (0..self.cpg_data.cpgs.len()).collect();
             (beta_matrix, cov_matrix, indices)
         };
 
-        // Filter cpg_locations to match filtered data
-        let cpg_locations: Vec<crate::genome::cpg::CpGSite> = covered_indices
+        let cpg_locations = covered_indices
             .iter()
-            .map(|&i| self.cpg_data.cpgs[i].clone())
+            .map(|&index| self.cpg_data.cpgs[index].clone())
             .collect();
 
         Ok(MethrixData {
             beta_matrix,
             cov_matrix,
             cpg_locations,
-            sample_names: files.into_iter().map(|f| extract_sample_name(&f)).collect(),
+            sample_names,
             genome: self.cpg_data.release_name.clone(),
         })
     }
 
-    fn process_single_file(&self, file_path: &str, min_coverage: u16) -> Result<ProcessedSample> {
-        let reader = BismarkReader::new(file_path.to_string());
-        let records = reader.read()?;
-        let min_coverage = min_coverage as u32;
-
+    fn process_single_file(&self, file_path: &str, min_coverage: u32) -> Result<ProcessedSample> {
+        let records = BismarkReader::new(file_path.to_string()).read()?;
         let n_cpgs = self.cpg_data.cpgs.len();
         let mut beta_values = vec![f32::NAN; n_cpgs];
-        let mut coverage_values = vec![0u16; n_cpgs];
+        let mut coverage_values = vec![0u32; n_cpgs];
+        let mut seen_keys = HashSet::with_capacity(records.len());
+        let mut matched_records = 0usize;
+        let mut input_contigs = HashSet::new();
+        let mut matched_contigs = HashSet::new();
 
-        // Align to reference CpGs - ported from R::read_bdg
         for record in records {
-            let chr = record.chr.clone();
-            let start = record.start;
-            if let Some(&idx) = self.cpg_index.get(&(chr, start)) {
-                let total = record.total_reads();
-                if total >= min_coverage && idx < n_cpgs {
-                    coverage_values[idx] = total as u16;
-                    beta_values[idx] = record.beta_value().unwrap();
+            let canonical_contig = canonical_contig_name(&record.chr);
+            input_contigs.insert(canonical_contig.clone());
+            let key = (canonical_contig, record.start);
+            if !seen_keys.insert(key.clone()) {
+                bail!(
+                    "Duplicate CpG record in {} at canonical position {}:{}; aggregate duplicate counts upstream or remove duplicate rows",
+                    file_path,
+                    key.0,
+                    key.1
+                );
+            }
+
+            if let Some(&reference_index) = self.cpg_index.get(&key) {
+                matched_records += 1;
+                matched_contigs.insert(key.0.clone());
+                let total_reads = record.total_reads();
+                if total_reads >= min_coverage && total_reads > 0 {
+                    coverage_values[reference_index] = total_reads;
+                    beta_values[reference_index] = record
+                        .beta_value()
+                        .context("Non-zero coverage unexpectedly produced no beta value")?;
                 }
             }
+        }
+
+        if matched_records == 0 {
+            bail!(
+                "No Bismark CpG records in {} matched the reference CpG index. Input contigs: {:?}; check reference build and chromosome naming",
+                file_path,
+                sorted_values(input_contigs)
+            );
+        }
+
+        let unmatched_contigs: Vec<String> = input_contigs
+            .difference(&matched_contigs)
+            .cloned()
+            .collect();
+        if !unmatched_contigs.is_empty() {
+            eprintln!(
+                "warning: {} contains contigs with no matching reference CpGs: {:?}",
+                file_path,
+                sorted_values(unmatched_contigs.into_iter().collect())
+            );
         }
 
         Ok(ProcessedSample {
@@ -132,7 +173,7 @@ impl MethrixProcessor {
 #[derive(Debug)]
 pub struct MethrixData {
     pub beta_matrix: ndarray::Array2<f32>,
-    pub cov_matrix: ndarray::Array2<u16>,
+    pub cov_matrix: ndarray::Array2<u32>,
     pub cpg_locations: Vec<CpGSite>,
     pub sample_names: Vec<String>,
     pub genome: String,
@@ -140,86 +181,125 @@ pub struct MethrixData {
 
 struct ProcessedSample {
     beta_values: Vec<f32>,
-    coverage_values: Vec<u16>,
+    coverage_values: Vec<u32>,
 }
 
-fn extract_sample_name(file_path: &str) -> String {
-    let path = Path::new(file_path);
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string()
+fn canonical_contig_name(contig: &str) -> String {
+    let trimmed_contig = contig.trim();
+    let without_prefix = trimmed_contig
+        .strip_prefix("chr")
+        .or_else(|| trimmed_contig.strip_prefix("CHR"))
+        .unwrap_or(trimmed_contig);
+    let uppercase_name = without_prefix.to_ascii_uppercase();
+    if uppercase_name == "M" {
+        "MT".to_string()
+    } else {
+        uppercase_name
+    }
 }
 
-/// Run the complete processing pipeline
-pub fn run_pipeline(
-    input_dir: String,
-    output_dir: String,
-    genome: String,
-    threads: usize,
-    min_coverage: u16,
-    remove_uncovered: bool,
-    annotation_dir: Option<String>,
-    skip_annotation: bool,
-) -> Result<()> {
-    // Create output directory
+fn normalized_sample_names(files: &[String]) -> Result<Vec<String>> {
+    let mut names = Vec::with_capacity(files.len());
+    let mut seen_names = HashSet::with_capacity(files.len());
+    for file_path in files {
+        let sample_name = extract_sample_name(file_path)?;
+        if !seen_names.insert(sample_name.clone()) {
+            bail!(
+                "Multiple Bismark files normalize to the same sample ID {:?}",
+                sample_name
+            );
+        }
+        names.push(sample_name);
+    }
+    Ok(names)
+}
+
+fn extract_sample_name(file_path: &str) -> Result<String> {
+    let file_name = Path::new(file_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .with_context(|| format!("Invalid Bismark file name {}", file_path))?;
+    const SUFFIXES: [&str; 4] = [".bismark.cov.gz", ".bismark.cov", ".cov.gz", ".cov"];
+    let sample_name = SUFFIXES
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))
+        .with_context(|| format!("Unsupported Bismark coverage file suffix: {}", file_name))?;
+    if sample_name.is_empty() {
+        bail!("Bismark file {} produces an empty sample ID", file_name);
+    }
+    Ok(sample_name.to_string())
+}
+
+fn sorted_values(values: HashSet<String>) -> Vec<String> {
+    let mut values: Vec<String> = values.into_iter().collect();
+    values.sort();
+    values
+}
+
+#[derive(Debug, Clone)]
+pub struct PipelineConfig {
+    pub input_dir: String,
+    pub output_dir: String,
+    pub genome: String,
+    pub threads: usize,
+    pub min_coverage: u32,
+    pub remove_uncovered: bool,
+    pub annotation_dir: Option<String>,
+    pub skip_annotation: bool,
+}
+
+pub fn run_pipeline(config: PipelineConfig) -> Result<()> {
+    let PipelineConfig {
+        input_dir,
+        output_dir,
+        genome,
+        threads,
+        min_coverage,
+        remove_uncovered,
+        annotation_dir,
+        skip_annotation,
+    } = config;
+
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
-    // Load or extract CpG data
-    let genome_lc = genome.to_ascii_lowercase();
-    let cpg_data = if genome_lc.ends_with(".ron") {
-        // It's a pre-extracted RON file
+    let genome_lowercase = genome.to_ascii_lowercase();
+    let cpg_data = if genome_lowercase.ends_with(".ron") {
         println!("Loading pre-extracted CpG data from: {}", genome);
         crate::genome::cpg::load_cpg_data(&genome)?
     } else if Path::new(&genome).exists() {
-        // Check if it's actually a RON file or FASTA
         if is_fasta_input(&genome) {
-            // It's a FASTA file, need to extract CpGs
             println!("Extracting CpG sites from FASTA: {}", genome);
-            let extractor = crate::genome::cpg::CpGExtractor::new(genome.clone());
-            extractor.extract()?
+            crate::genome::cpg::CpGExtractor::new(genome.clone()).extract()?
         } else {
-            // Try to load as RON file
             println!("Loading CpG data from: {}", genome);
             crate::genome::cpg::load_cpg_data(&genome)?
         }
     } else {
-        // Check if it's a pre-extracted RON file with .ron extension
         let ron_path = format!("{}.ron", genome);
         if Path::new(&ron_path).exists() {
             println!("Loading pre-extracted CpG data from: {}", ron_path);
             crate::genome::cpg::load_cpg_data(&ron_path)?
         } else {
-            // Provide actionable local file guidance.
-            println!("Genome file not found: {}", genome);
-            println!("Please either:");
-            println!("1. Provide a FASTA file path (.fa/.fasta/.fna, optional .gz)");
-            println!("2. Provide a pre-extracted .ron file path");
-            println!(
-                "3. Run: methrix extract-cpgs --genome <fasta> --output {}.ron",
+            bail!(
+                "CpG data not found for {}. Provide a FASTA file or pre-extracted RON file",
                 genome
             );
-            anyhow::bail!("CpG data not found")
         }
     };
 
-    // Find Bismark files
     let bismark_files = find_bismark_files(&input_dir)?;
     println!("Found {} Bismark files", bismark_files.len());
 
-    // Process files
-    let processor = MethrixProcessor::new(cpg_data);
+    let processor = MethrixProcessor::new(cpg_data)?;
     let methrix_data =
         processor.process_files_parallel(bismark_files, threads, min_coverage, remove_uncovered)?;
 
-    // Write H5 file
     let assays_h5_path = Path::new(&output_dir).join("assays.h5");
     let compat_h5_path = Path::new(&output_dir).join("methrix_data.h5");
     println!("Writing HDF5 file to: {}", assays_h5_path.display());
 
-    let writer = SummarizedExperimentWriter::new(assays_h5_path.to_string_lossy().to_string());
-    writer.write_methrix_object(&methrix_data)?;
-    // Keep legacy filename for compatibility with older scripts.
+    SummarizedExperimentWriter::new(assays_h5_path.to_string_lossy().to_string())
+        .write_methrix_object(&methrix_data)?;
     fs::copy(&assays_h5_path, &compat_h5_path).with_context(|| {
         format!(
             "Failed to create compatibility HDF5 copy: {}",
@@ -227,10 +307,8 @@ pub fn run_pipeline(
         )
     })?;
 
-    // Generate QC report
     let qc_path = Path::new(&output_dir).join("CpG_coverage.xlsx");
     println!("Generating QC report: {}", qc_path.display());
-
     let sample_stats =
         stats::calculate_coverage_stats(&methrix_data.cov_matrix, &methrix_data.sample_names);
     crate::qc::report::generate_coverage_report(qc_path.to_str().unwrap(), &sample_stats)?;
@@ -243,7 +321,6 @@ pub fn run_pipeline(
             "Generating CpG annotation report: {}",
             annotation_path.display()
         );
-
         let annotation_result = crate::annotation::annotate_cpgs(
             &methrix_data.cpg_locations,
             &methrix_data.cov_matrix,
@@ -255,30 +332,17 @@ pub fn run_pipeline(
     }
 
     println!("\nPipeline completed successfully!");
-    println!("Output files:");
-    println!("  - HDF5: {}", assays_h5_path.display());
-    println!("  - HDF5 (compat): {}", compat_h5_path.display());
-    println!("  - QC Report: {}", qc_path.display());
-    if !skip_annotation {
-        println!(
-            "  - Annotation Report: {}",
-            Path::new(&output_dir)
-                .join("CpG_annotation_report.xlsx")
-                .display()
-        );
-    }
-
     Ok(())
 }
 
 fn is_fasta_input(path: &str) -> bool {
-    let path_lc = path.to_ascii_lowercase();
-    path_lc.ends_with(".fa")
-        || path_lc.ends_with(".fasta")
-        || path_lc.ends_with(".fna")
-        || path_lc.ends_with(".fa.gz")
-        || path_lc.ends_with(".fasta.gz")
-        || path_lc.ends_with(".fna.gz")
+    let path_lowercase = path.to_ascii_lowercase();
+    path_lowercase.ends_with(".fa")
+        || path_lowercase.ends_with(".fasta")
+        || path_lowercase.ends_with(".fna")
+        || path_lowercase.ends_with(".fa.gz")
+        || path_lowercase.ends_with(".fasta.gz")
+        || path_lowercase.ends_with(".fna.gz")
 }
 
 fn find_bismark_files(dir: &str) -> Result<Vec<String>> {
@@ -288,18 +352,47 @@ fn find_bismark_files(dir: &str) -> Result<Vec<String>> {
     for entry in fs::read_dir(path).context("Failed to read input directory")? {
         let entry = entry?;
         let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
-
-        if file_name_str.ends_with(".bismark.cov.gz") || file_name_str.ends_with(".cov.gz") {
+        let file_name_string = file_name.to_string_lossy();
+        if file_name_string.ends_with(".bismark.cov.gz")
+            || file_name_string.ends_with(".bismark.cov")
+            || file_name_string.ends_with(".cov.gz")
+            || file_name_string.ends_with(".cov")
+        {
             files.push(entry.path().to_string_lossy().to_string());
         }
     }
 
     files.sort();
-
     if files.is_empty() {
-        anyhow::bail!("No Bismark files found in directory: {}", dir);
+        bail!("No Bismark coverage files found in directory: {}", dir);
+    }
+    Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonicalizes_common_contig_aliases() {
+        assert_eq!(canonical_contig_name("chr1"), "1");
+        assert_eq!(canonical_contig_name("1"), "1");
+        assert_eq!(canonical_contig_name("chrM"), "MT");
+        assert_eq!(canonical_contig_name("MT"), "MT");
     }
 
-    Ok(files)
+    #[test]
+    fn normalizes_bismark_sample_suffixes() {
+        assert_eq!(
+            extract_sample_name("/tmp/sample.bismark.cov.gz").unwrap(),
+            "sample"
+        );
+        assert_eq!(extract_sample_name("/tmp/sample.cov").unwrap(), "sample");
+    }
+
+    #[test]
+    fn rejects_duplicate_normalized_sample_ids() {
+        let files = vec!["sample.cov".to_string(), "sample.cov.gz".to_string()];
+        assert!(normalized_sample_names(&files).is_err());
+    }
 }

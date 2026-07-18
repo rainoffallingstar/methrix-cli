@@ -36,7 +36,7 @@ pub fn generate_coverage_report(
         worksheet.write_number(row, 2, stats.n_covered as f64)?;
 
         for (col, (_, count)) in stats.coverage_distribution.iter().enumerate() {
-            worksheet.write_number(row, (3 + col as u32) as u16, *count as f64)?;
+            worksheet.write_number(row, (3 + col) as u16, *count as f64)?;
         }
     }
 
@@ -97,7 +97,7 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
         .map(|s: &hdf5::types::VarLenAscii| s.to_string())
         .collect();
 
-    let cov_matrix: Vec<u16> = cov_dataset
+    let cov_matrix: Vec<u32> = cov_dataset
         .read_raw()
         .context("Failed to read coverage data")?;
 
@@ -118,7 +118,7 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
     generate_coverage_report(output_path, &stats)
 }
 
-fn reshape_cov_by_sample(raw: &[u16], shape: &[usize], n_samples: usize) -> Result<Vec<Vec<u16>>> {
+fn reshape_cov_by_sample(raw: &[u32], shape: &[usize], n_samples: usize) -> Result<Vec<Vec<u32>>> {
     if shape.len() != 2 {
         anyhow::bail!("Expected 2D coverage matrix, got shape {:?}", shape);
     }
@@ -149,11 +149,10 @@ fn reshape_cov_by_sample(raw: &[u16], shape: &[usize], n_samples: usize) -> Resu
     if dim1 == n_samples {
         // Stored as [cpgs, samples] in row-major.
         let n_cpgs = dim0;
-        let mut out = vec![vec![0u16; n_cpgs]; n_samples];
-        for cpg_idx in 0..n_cpgs {
-            let row_start = cpg_idx * n_samples;
-            for sample_idx in 0..n_samples {
-                out[sample_idx][cpg_idx] = raw[row_start + sample_idx];
+        let mut out = vec![vec![0u32; n_cpgs]; n_samples];
+        for (cpg_index, coverage_row) in raw.chunks_exact(n_samples).enumerate() {
+            for (sample_values, coverage_value) in out.iter_mut().zip(coverage_row.iter()) {
+                sample_values[cpg_index] = *coverage_value;
             }
         }
         return Ok(out);
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn reshape_samples_by_cpgs_layout() {
         // [samples=2, cpgs=3]
-        let raw = vec![1u16, 0, 5, 2, 3, 0];
+        let raw = vec![1u32, 0, 5, 2, 3, 0];
         let shape = vec![2usize, 3usize];
         let out = reshape_cov_by_sample(&raw, &shape, 2).unwrap();
         assert_eq!(out, vec![vec![1, 0, 5], vec![2, 3, 0]]);
@@ -182,7 +181,7 @@ mod tests {
     #[test]
     fn reshape_cpgs_by_samples_layout() {
         // [cpgs=3, samples=2]
-        let raw = vec![1u16, 2, 0, 3, 5, 0];
+        let raw = vec![1u32, 2, 0, 3, 5, 0];
         let shape = vec![3usize, 2usize];
         let out = reshape_cov_by_sample(&raw, &shape, 2).unwrap();
         assert_eq!(out, vec![vec![1, 0, 5], vec![2, 3, 0]]);

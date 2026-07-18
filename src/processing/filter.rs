@@ -11,7 +11,7 @@ impl SeparatedString for usize {
         let mut result = String::new();
         let chars: Vec<char> = s.chars().collect();
         for (i, c) in chars.iter().enumerate() {
-            if i > 0 && (chars.len() - i) % 3 == 0 {
+            if i > 0 && (chars.len() - i).is_multiple_of(3) {
                 result.push(',');
             }
             result.push(*c);
@@ -20,12 +20,14 @@ impl SeparatedString for usize {
     }
 }
 
+pub type FilteredMatrices = (Array2<f32>, Array2<u32>, Vec<usize>);
+
 /// Remove uncovered loci - ported from R::remove_uncovered
 /// Returns (filtered_beta, filtered_cov, covered_indices)
 pub fn remove_uncovered(
     beta_matrix: Array2<f32>,
-    cov_matrix: Array2<u16>,
-) -> Result<(Array2<f32>, Array2<u16>, Vec<usize>), anyhow::Error> {
+    cov_matrix: Array2<u32>,
+) -> Result<FilteredMatrices, anyhow::Error> {
     let (n_cpgs, n_samples) = cov_matrix.dim();
 
     // Find CpGs covered in at least one sample
@@ -68,7 +70,7 @@ pub fn remove_uncovered(
 }
 
 /// Coverage filter - ported from R::coverage_filter
-pub fn coverage_filter(cov_matrix: &Array2<u16>, cov_thr: u16, min_samples: usize) -> Vec<bool> {
+pub fn coverage_filter(cov_matrix: &Array2<u32>, cov_thr: u32, min_samples: usize) -> Vec<bool> {
     let (n_cpgs, n_samples) = cov_matrix.dim();
 
     (0..n_cpgs)
@@ -88,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_remove_uncovered() {
-        let mut beta = Array2::zeros((3, 2));
+        let beta = Array2::zeros((3, 2));
         let mut cov = Array2::zeros((3, 2));
 
         // Set some values

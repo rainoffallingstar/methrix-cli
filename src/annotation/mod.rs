@@ -70,7 +70,6 @@ struct RankedInterval {
 
 #[derive(Debug, Clone)]
 struct TranscriptModel {
-    chr: String,
     strand: char,
     transcript_id: String,
     gene_id: String,
@@ -223,7 +222,7 @@ impl AnnotationResult {
 
 pub fn annotate_cpgs(
     cpg_sites: &[CpGSite],
-    cov_matrix: &Array2<u16>,
+    cov_matrix: &Array2<u32>,
     sample_names: &[String],
     genome: &str,
     annotation_dir: Option<&str>,
@@ -248,7 +247,7 @@ pub fn annotate_cpgs(
         });
     }
 
-    let sample_summary = calculate_sample_annotation_summary(&records, cov_matrix, sample_names);
+    let sample_summary = calculate_sample_annotation_summary(&records, cov_matrix, sample_names)?;
 
     Ok(AnnotationResult {
         records,
@@ -258,12 +257,17 @@ pub fn annotate_cpgs(
 
 fn calculate_sample_annotation_summary(
     records: &[AnnotationRecord],
-    cov_matrix: &Array2<u16>,
+    cov_matrix: &Array2<u32>,
     sample_names: &[String],
-) -> Vec<SampleAnnotationRow> {
+) -> Result<Vec<SampleAnnotationRow>> {
     let (n_rows, n_samples) = cov_matrix.dim();
     if n_rows != records.len() || n_samples != sample_names.len() {
-        return Vec::new();
+        anyhow::bail!(
+            "Annotation matrix dimensions {:?} do not match {} records and {} samples",
+            cov_matrix.dim(),
+            records.len(),
+            sample_names.len()
+        );
     }
 
     let mut rows = Vec::new();
@@ -286,7 +290,7 @@ fn calculate_sample_annotation_summary(
         });
     }
 
-    rows
+    Ok(rows)
 }
 
 fn load_annotation_resources(
@@ -296,13 +300,14 @@ fn load_annotation_resources(
     let genome_key = normalize_genome_name(genome);
     let inferred_dir = Path::new(genome)
         .parent()
-        .and_then(|p| p.to_str())
-        .map(|s| s.to_string());
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .and_then(|parent| parent.to_str())
+        .map(str::to_string);
     let dir = annotation_dir
-        .map(|s| s.to_string())
+        .map(str::to_string)
         .or(inferred_dir)
         .context(
-            "Annotation requires a GTF directory: pass --annotation-dir or provide --genome with a parent directory",
+            "Annotation requires --annotation-dir unless --genome includes a parent directory",
         )?;
     let dir_path = Path::new(&dir);
     let gtf_path = find_gtf_path(dir_path, &genome_key).with_context(|| {
@@ -515,7 +520,6 @@ fn load_genes_from_gtf(path: &Path) -> Result<GeneAnnotations> {
         let introns = build_introns(&builder.exons, builder.strand);
 
         let model = TranscriptModel {
-            chr: builder.chr.clone(),
             strand: builder.strand,
             transcript_id: builder.transcript_id.clone(),
             gene_id: builder.gene_id.clone(),
@@ -766,7 +770,6 @@ mod tests {
     #[test]
     fn promoter_priority_over_exon() {
         let tx = TranscriptModel {
-            chr: "chr1".to_string(),
             strand: '+',
             transcript_id: "tx1".to_string(),
             gene_id: "gene1".to_string(),
@@ -805,7 +808,6 @@ mod tests {
     #[test]
     fn intergenic_uses_nearest_gene() {
         let tx = TranscriptModel {
-            chr: "chr2".to_string(),
             strand: '+',
             transcript_id: "tx2".to_string(),
             gene_id: "gene2".to_string(),
@@ -872,14 +874,14 @@ mod tests {
             },
         ];
 
-        let mut cov = Array2::<u16>::zeros((2, 2));
+        let mut cov = Array2::<u32>::zeros((2, 2));
         cov[(0, 0)] = 5; // sample1 covers promoter
         cov[(1, 0)] = 0; // sample1 does not cover exon
         cov[(0, 1)] = 0; // sample2 does not cover promoter
         cov[(1, 1)] = 7; // sample2 covers exon
 
         let sample_names = vec!["sample1".to_string(), "sample2".to_string()];
-        let summary = calculate_sample_annotation_summary(&records, &cov, &sample_names);
+        let summary = calculate_sample_annotation_summary(&records, &cov, &sample_names).unwrap();
 
         assert_eq!(summary.len(), 2);
 

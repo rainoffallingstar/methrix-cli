@@ -26,6 +26,7 @@ pub fn download_genome(genome: &str, output_dir: &str) -> anyhow::Result<String>
     Ok(output_path.to_string_lossy().to_string())
 }
 
+#[cfg(feature = "download")]
 fn get_genome_url(genome: &str) -> Option<&'static str> {
     match genome.to_lowercase().as_str() {
         "hg19" => Some("https://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz"),

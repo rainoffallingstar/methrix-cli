@@ -14,7 +14,7 @@ impl SeparatedString for usize {
         let mut result = String::new();
         let chars: Vec<char> = s.chars().collect();
         for (i, c) in chars.iter().enumerate() {
-            if i > 0 && (chars.len() - i) % 3 == 0 {
+            if i > 0 && (chars.len() - i).is_multiple_of(3) {
                 result.push(',');
             }
             result.push(*c);
@@ -160,7 +160,9 @@ impl CpGExtractor {
         let mut i = 0;
         while i < bytes.len().saturating_sub(1) {
             // CpG is defined as C followed by G (on positive strand)
-            if bytes[i] == b'C' && bytes[i + 1] == b'G' {
+            let current_base = bytes[i].to_ascii_uppercase();
+            let next_base = bytes[i + 1].to_ascii_uppercase();
+            if current_base == b'C' && next_base == b'G' {
                 cpgs.push(CpGSite {
                     chr: chr.to_string(),
                     start: i as u32, // 0-based, internal use
@@ -257,7 +259,7 @@ mod tests {
     #[test]
     fn test_extract_cpgs_from_sequence() {
         let extractor = CpGExtractor::new("test.fa".to_string());
-        let seq = b"ATCGATCGAA";
+        let seq = b"ATcgATCGAA";
         let cpgs = extractor.extract_cpgs_from_sequence("chr1", seq);
 
         // Should find 2 CG sites

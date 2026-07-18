@@ -35,7 +35,7 @@ enum Commands {
 
         /// Minimum coverage for a CpG to be considered covered
         #[arg(long, default_value = "1")]
-        min_coverage: u16,
+        min_coverage: u32,
 
         /// Remove loci uncovered across all samples
         #[arg(long, default_value = "true")]
@@ -145,16 +145,16 @@ fn main() -> anyhow::Result<()> {
             info!("Annotation dir: {:?}", annotation_dir);
             info!("Skip annotation: {}", skip_annotation);
 
-            process::run_pipeline(
-                input,
-                output,
+            process::run_pipeline(process::PipelineConfig {
+                input_dir: input,
+                output_dir: output,
                 genome,
                 threads,
                 min_coverage,
                 remove_uncovered,
                 annotation_dir,
                 skip_annotation,
-            )
+            })
         }
 
         Commands::ExtractCpGs {
@@ -167,14 +167,19 @@ fn main() -> anyhow::Result<()> {
             cpg::extract_and_save(genome, output, contigs)
         }
 
-        Commands::DownloadGenome { genome, output, .. } => {
+        Commands::DownloadGenome {
+            genome,
+            output: output_directory,
+            ..
+        } => {
             info!("Downloading genome: {}", genome);
             #[cfg(feature = "download")]
             {
-                methrix_cli::genome::download::download_genome(&genome, &output)
+                methrix_cli::genome::download::download_genome(&genome, &output_directory)
             }
             #[cfg(not(feature = "download"))]
             {
+                let _ = output_directory;
                 anyhow::bail!(
                     "Download feature not enabled. Please rebuild with --features download"
                 )

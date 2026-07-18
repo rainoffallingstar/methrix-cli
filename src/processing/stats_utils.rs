@@ -1,6 +1,6 @@
 /// Calculate coverage statistics from vector representation
 pub fn calculate_coverage_stats_from_vec(
-    cov_matrix: &[Vec<u16>],
+    cov_matrix: &[Vec<u32>],
     sample_names: &[String],
 ) -> Vec<super::stats::SampleStats> {
     let n_samples = cov_matrix.len();
@@ -8,7 +8,7 @@ pub fn calculate_coverage_stats_from_vec(
     (0..n_samples)
         .map(|j| {
             let sample_cov = &cov_matrix[j];
-            let covered: Vec<u16> = sample_cov.iter().copied().filter(|&x| x > 0).collect();
+            let covered: Vec<u32> = sample_cov.iter().copied().filter(|&x| x > 0).collect();
 
             super::stats::SampleStats {
                 sample_name: sample_names[j].clone(),
@@ -25,7 +25,7 @@ pub fn calculate_coverage_stats_from_vec(
         .collect()
 }
 
-pub fn calculate_distribution_ref(covered: &[&u16]) -> Vec<(u16, usize)> {
+pub fn calculate_distribution_ref(covered: &[&u32]) -> Vec<(u32, usize)> {
     let thresholds = [1, 2, 3, 4, 5, 10];
     thresholds
         .iter()

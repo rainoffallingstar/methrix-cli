@@ -2,7 +2,7 @@ use rayon::prelude::*;
 
 /// Calculate coverage statistics from Vec<Vec> - for H5 reading
 pub fn calculate_coverage_stats_from_vec(
-    cov_matrix: &[Vec<u16>],
+    cov_matrix: &[Vec<u32>],
     sample_names: &[String],
 ) -> Vec<SampleStats> {
     use rayon::prelude::*;
@@ -12,7 +12,7 @@ pub fn calculate_coverage_stats_from_vec(
         .enumerate()
         .map(|(j, name)| {
             let sample_cov = &cov_matrix[j];
-            let covered: Vec<u16> = sample_cov.iter().copied().filter(|&x| x > 0).collect();
+            let covered: Vec<u32> = sample_cov.iter().copied().filter(|&x| x > 0).collect();
 
             SampleStats {
                 sample_name: name.clone(),
@@ -31,7 +31,7 @@ pub fn calculate_coverage_stats_from_vec(
 
 /// Calculate coverage statistics - ported from R::get_stats
 pub fn calculate_coverage_stats(
-    cov_matrix: &ndarray::Array2<u16>,
+    cov_matrix: &ndarray::Array2<u32>,
     sample_names: &[String],
 ) -> Vec<SampleStats> {
     let (_, n_samples) = cov_matrix.dim();
@@ -39,8 +39,8 @@ pub fn calculate_coverage_stats(
     (0..n_samples)
         .into_par_iter()
         .map(|j| {
-            let sample_cov: Vec<u16> = cov_matrix.column(j).to_vec();
-            let covered: Vec<u16> = sample_cov.into_iter().filter(|&x| x > 0).collect();
+            let sample_cov: Vec<u32> = cov_matrix.column(j).to_vec();
+            let covered: Vec<u32> = sample_cov.into_iter().filter(|&x| x > 0).collect();
 
             SampleStats {
                 sample_name: sample_names[j].clone(),
@@ -63,10 +63,10 @@ pub struct SampleStats {
     pub n_covered: usize,
     pub n_total: usize,
     pub mean_coverage: f32,
-    pub coverage_distribution: Vec<(u16, usize)>, // (threshold, count)
+    pub coverage_distribution: Vec<(u32, usize)>, // (threshold, count)
 }
 
-pub fn calculate_distribution(covered: &[u16]) -> Vec<(u16, usize)> {
+pub fn calculate_distribution(covered: &[u32]) -> Vec<(u32, usize)> {
     let thresholds = [1, 2, 3, 4, 5, 10];
     thresholds
         .iter()
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_coverage_distribution() {
-        let covered = vec![1u16, 2, 5, 10, 15];
+        let covered = vec![1u32, 2, 5, 10, 15];
         let dist = calculate_distribution(&covered);
 
         assert_eq!(dist.len(), 6); // 6 thresholds

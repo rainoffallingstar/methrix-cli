@@ -18,6 +18,7 @@ impl SummarizedExperimentWriter {
         methrix_data: &crate::cli::process::MethrixData,
     ) -> Result<()> {
         let file = File::create(&self.output_path).context("Failed to create HDF5 file")?;
+        self.write_se_attributes(&file)?;
 
         // 1. Write assays (required for both direct reading and se.rds)
         self.write_assay(&file, "beta", &methrix_data.beta_matrix)?;
@@ -94,18 +95,24 @@ impl SummarizedExperimentWriter {
             .iter()
             .map(|cpg| VarLenAscii::from_ascii(&cpg.chr).unwrap())
             .collect();
-        let start: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.start).collect();
+        let start: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.start + 1).collect();
+        let end: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.end).collect();
         let strand: Vec<VarLenAscii> = cpg_locations
             .iter()
             .map(|cpg| VarLenAscii::from_ascii(&cpg.strand.to_string()).unwrap())
             .collect();
-        let end: Vec<u32> = start.iter().map(|s| s + 2).collect(); // CpG length is 2
 
         group
             .new_dataset_builder()
             .with_data(&chr)
             .create("chr")
             .context("Failed to create chr dataset")?;
+
+        group
+            .new_dataset_builder()
+            .with_data(&chr)
+            .create("seqnames")
+            .context("Failed to create seqnames dataset")?;
 
         group
             .new_dataset_builder()
@@ -118,6 +125,17 @@ impl SummarizedExperimentWriter {
             .with_data(&end)
             .create("end")
             .context("Failed to create end dataset")?;
+
+        let width: Vec<u32> = start
+            .iter()
+            .zip(end.iter())
+            .map(|(start_position, end_position)| end_position - start_position + 1)
+            .collect();
+        group
+            .new_dataset_builder()
+            .with_data(&width)
+            .create("width")
+            .context("Failed to create width dataset")?;
 
         group
             .new_dataset_builder()
@@ -140,6 +158,12 @@ impl SummarizedExperimentWriter {
             .with_data(&names)
             .create("sample_id")
             .context("Failed to create sample_id dataset")?;
+
+        group
+            .new_dataset_builder()
+            .with_data(&names)
+            .create("sample_name")
+            .context("Failed to create sample_name dataset")?;
 
         Ok(())
     }
@@ -171,7 +195,7 @@ impl SummarizedExperimentWriter {
             .new_attr::<u32>()
             .create("se_version")
             .context("Failed to create se_version attribute")?;
-        attr.write_scalar(&1)?;
+        attr.write_scalar(&2)?;
 
         let delayed_array_str = unsafe { VarLenUnicode::from_str_unchecked("HDF5Array") };
         let attr = file
@@ -181,5 +205,107 @@ impl SummarizedExperimentWriter {
         attr.write_scalar(&delayed_array_str)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SummarizedExperimentWriter;
+    use crate::cli::process::MethrixData;
+    use crate::genome::cpg::CpGSite;
+    use hdf5::types::VarLenAscii;
+    use ndarray::Array2;
+    use tempfile::tempdir;
+
+    #[test]
+    fn writes_schema_v2_with_u32_coverage_and_r_coordinates() {
+        let temporary_directory = tempdir().unwrap();
+        let output_path = temporary_directory.path().join("assays.h5");
+        let methrix_data = MethrixData {
+            beta_matrix: Array2::from_shape_vec((2, 2), vec![0.25, 0.5, 0.75, 1.0]).unwrap(),
+            cov_matrix: Array2::from_shape_vec((2, 2), vec![70_000, 2, 3, 4]).unwrap(),
+            cpg_locations: vec![
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 9,
+                    end: 11,
+                    strand: '+',
+                },
+                CpGSite {
+                    chr: "chr2".to_string(),
+                    start: 19,
+                    end: 21,
+                    strand: '+',
+                },
+            ],
+            sample_names: vec!["sample_a".to_string(), "sample_b".to_string()],
+            genome: "hg38".to_string(),
+        };
+
+        SummarizedExperimentWriter::new(output_path.to_string_lossy().into_owned())
+            .write_methrix_object(&methrix_data)
+            .unwrap();
+
+        let file = hdf5::File::open(&output_path).unwrap();
+        assert_eq!(
+            file.attr("se_version")
+                .unwrap()
+                .read_scalar::<u32>()
+                .unwrap(),
+            2
+        );
+
+        let coverage_dataset = file.dataset("cov").unwrap();
+        assert_eq!(coverage_dataset.shape(), vec![2, 2]);
+        assert_eq!(
+            coverage_dataset.read_raw::<u32>().unwrap(),
+            vec![70_000, 3, 2, 4]
+        );
+
+        let row_data = file.group("rowData").unwrap();
+        assert_eq!(
+            row_data
+                .dataset("start")
+                .unwrap()
+                .read_raw::<u32>()
+                .unwrap(),
+            vec![10, 20]
+        );
+        assert_eq!(
+            row_data.dataset("end").unwrap().read_raw::<u32>().unwrap(),
+            vec![11, 21]
+        );
+        assert_eq!(
+            row_data
+                .dataset("width")
+                .unwrap()
+                .read_raw::<u32>()
+                .unwrap(),
+            vec![2, 2]
+        );
+        assert_eq!(
+            row_data
+                .dataset("seqnames")
+                .unwrap()
+                .read_raw::<VarLenAscii>()
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["chr1", "chr2"]
+        );
+
+        let column_data = file.group("colData").unwrap();
+        assert_eq!(
+            column_data
+                .dataset("sample_name")
+                .unwrap()
+                .read_raw::<VarLenAscii>()
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["sample_a", "sample_b"]
+        );
     }
 }
