@@ -27,22 +27,27 @@
 
 ## 🎯 更新的 HDF5 结构
 
-### 新结构 (v2.0)
+### 新结构 (schema v2)
 ```
 assays.h5
-├── /beta              FLOAT [80028 x 2]  - 甲基化值矩阵
-├── /cov               INTEGER [80028 x 2] - 覆盖度矩阵
+├── /beta              FLOAT32 [sample x CpG] - 甲基化值矩阵
+├── /cov               UINT32 [sample x CpG]  - coverage 矩阵
 ├── /rowData/
-│   ├── chr            STRING [80028]
-│   ├── start          INTEGER [80028]
-│   ├── end            INTEGER [80028]
-│   └── strand         STRING [80028]
+│   ├── chr            UTF-8 STRING [CpG]      - 兼容字段
+│   ├── seqnames       UTF-8 STRING [CpG]
+│   ├── start          UINT32 [CpG]            - 1-based closed
+│   ├── end            UINT32 [CpG]            - 1-based closed
+│   ├── width          UINT32 [CpG]
+│   └── strand         UTF-8 STRING [CpG]
 ├── /colData/
-│   └── sample_id      STRING [2]
+│   ├── sample_id      UTF-8 STRING [sample]   - 兼容字段
+│   └── sample_name    UTF-8 STRING [sample]
 └── /metadata/
-    ├── genome         STRING
-    └── is_h5          ENUM
+    ├── genome         UTF-8 STRING
+    └── is_h5          BOOLEAN
 ```
+
+根属性 `se_version = 2`。Rust 内部坐标为 0-based half-open；HDF5 `rowData` 坐标为 R/Bioconductor 使用的 1-based closed。
 
 ### 旧结构 (v1.0)
 ```
@@ -90,7 +95,7 @@ cov_h5 <- HDF5Array(h5_file, "cov")
 library(SummarizedExperiment)
 se <- SummarizedExperiment(
   assays = list(beta = beta_h5, cov = cov_h5),
-  rowRanges = GRanges(chr, IRanges(start + 1, end), strand),
+  rowRanges = GRanges(seqnames, IRanges(start, end), strand),
   colData = DataFrame(sample_id = sample_names)
 )
 ```

@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::cli::process::canonical_contig_name;
 use crate::genome::cpg::CpGSite;
 
 const PROMOTER_WINDOW: u32 = 3_000;
@@ -403,7 +404,7 @@ fn load_genes_from_gtf(path: &Path) -> Result<GeneAnnotations> {
             continue;
         }
 
-        let chr = fields[0].to_string();
+        let chr = canonical_contig_name(fields[0]);
         let feature = fields[2].to_ascii_lowercase();
         let start_1: u32 = match fields[3].parse() {
             Ok(v) => v,
@@ -626,7 +627,8 @@ struct FeatureHit {
 }
 
 fn annotate_genomic_feature(genes: &GeneAnnotations, chr: &str, pos: u32) -> FeatureHit {
-    let Some(transcripts) = genes.transcripts_by_chr.get(chr) else {
+    let canonical_chr = canonical_contig_name(chr);
+    let Some(transcripts) = genes.transcripts_by_chr.get(&canonical_chr) else {
         return FeatureHit {
             annotation: GenomicAnnotation::Intergenic,
             gene_id: "".to_string(),
@@ -766,6 +768,75 @@ fn signed_distance_to_tss(pos: u32, tss: u32, strand: char) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn gtf_chr_aliases_match_cpg_contig_names() -> Result<()> {
+        let mut gtf_file = NamedTempFile::new()?;
+        writeln!(
+            gtf_file,
+            "chr1\ttest\ttranscript\t101\t200\t.\t+\t.\tgene_id \"gene_chr1\"; transcript_id \"tx_chr1\"; gene_name \"GENE1\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id \"gene_chr1\"; transcript_id \"tx_chr1\"; gene_name \"GENE1\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chrM\ttest\ttranscript\t501\t600\t.\t+\t.\tgene_id \"gene_chr_m\"; transcript_id \"tx_chr_m\"; gene_name \"MTGENE\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chrM\ttest\texon\t501\t600\t.\t+\t.\tgene_id \"gene_chr_m\"; transcript_id \"tx_chr_m\"; gene_name \"MTGENE\";"
+        )?;
+
+        let genes = load_genes_from_gtf(gtf_file.path())?;
+
+        let autosome_hit = annotate_genomic_feature(&genes, "1", 150);
+        assert_eq!(autosome_hit.gene_id, "gene_chr1");
+        assert_ne!(autosome_hit.annotation, GenomicAnnotation::Intergenic);
+
+        let mitochondrial_hit = annotate_genomic_feature(&genes, "MT", 550);
+        assert_eq!(mitochondrial_hit.gene_id, "gene_chr_m");
+        assert_ne!(mitochondrial_hit.annotation, GenomicAnnotation::Intergenic);
+
+        Ok(())
+    }
+
+    #[test]
+    fn gtf_contig_aliases_match_cpg_contigs() -> Result<()> {
+        let mut gtf_file = NamedTempFile::new()?;
+        writeln!(
+            gtf_file,
+            "chr1\ttest\ttranscript\t10001\t10100\t.\t+\t.\tgene_id \"gene_chr1\"; transcript_id \"tx_chr1\"; gene_name \"GENE1\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chr1\ttest\texon\t10001\t10100\t.\t+\t.\tgene_id \"gene_chr1\"; transcript_id \"tx_chr1\"; gene_name \"GENE1\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chrM\ttest\ttranscript\t201\t300\t.\t+\t.\tgene_id \"gene_mito\"; transcript_id \"tx_mito\"; gene_name \"MTGENE\";"
+        )?;
+        writeln!(
+            gtf_file,
+            "chrM\ttest\texon\t201\t300\t.\t+\t.\tgene_id \"gene_mito\"; transcript_id \"tx_mito\"; gene_name \"MTGENE\";"
+        )?;
+        gtf_file.flush()?;
+
+        let genes = load_genes_from_gtf(gtf_file.path())?;
+
+        let chromosome_hit = annotate_genomic_feature(&genes, "1", 10_049);
+        assert_eq!(chromosome_hit.gene_id, "gene_chr1");
+        assert_ne!(chromosome_hit.annotation, GenomicAnnotation::Intergenic);
+
+        let mitochondrial_hit = annotate_genomic_feature(&genes, "MT", 249);
+        assert_eq!(mitochondrial_hit.gene_id, "gene_mito");
+        assert_ne!(mitochondrial_hit.annotation, GenomicAnnotation::Intergenic);
+
+        Ok(())
+    }
 
     #[test]
     fn promoter_priority_over_exon() {
@@ -798,7 +869,7 @@ mod tests {
         };
 
         let genes = GeneAnnotations {
-            transcripts_by_chr: HashMap::from([("chr1".to_string(), vec![tx])]),
+            transcripts_by_chr: HashMap::from([("1".to_string(), vec![tx])]),
         };
 
         let hit = annotate_genomic_feature(&genes, "chr1", 1200);
@@ -827,12 +898,84 @@ mod tests {
         };
 
         let genes = GeneAnnotations {
-            transcripts_by_chr: HashMap::from([("chr2".to_string(), vec![tx])]),
+            transcripts_by_chr: HashMap::from([("2".to_string(), vec![tx])]),
         };
 
         let hit = annotate_genomic_feature(&genes, "chr2", 1000);
         assert_eq!(hit.annotation, GenomicAnnotation::Intergenic);
         assert_eq!(hit.gene_id, "gene2");
+    }
+
+    #[test]
+    fn classifies_all_supported_transcript_regions() {
+        let transcript = TranscriptModel {
+            strand: '+',
+            transcript_id: "tx_regions".to_string(),
+            gene_id: "gene_regions".to_string(),
+            gene_symbol: "REGIONS".to_string(),
+            tx_start: 100,
+            tx_end: 500,
+            tss: 100,
+            promoter: Interval {
+                start: 90,
+                end: 110,
+            },
+            downstream: Interval {
+                start: 500,
+                end: 600,
+            },
+            exons: vec![
+                RankedInterval {
+                    interval: Interval {
+                        start: 120,
+                        end: 150,
+                    },
+                    rank_label: "Exon 1 of 2".to_string(),
+                },
+                RankedInterval {
+                    interval: Interval {
+                        start: 200,
+                        end: 230,
+                    },
+                    rank_label: "Exon 2 of 2".to_string(),
+                },
+            ],
+            introns: vec![RankedInterval {
+                interval: Interval {
+                    start: 150,
+                    end: 200,
+                },
+                rank_label: "Intron 1 of 1".to_string(),
+            }],
+            utr5: vec![Interval {
+                start: 110,
+                end: 120,
+            }],
+            utr3: vec![Interval {
+                start: 230,
+                end: 250,
+            }],
+        };
+        let genes = GeneAnnotations {
+            transcripts_by_chr: HashMap::from([("1".to_string(), vec![transcript])]),
+        };
+
+        let expected_annotations = [
+            (100, GenomicAnnotation::Promoter, ""),
+            (115, GenomicAnnotation::FivePrimeUtr, ""),
+            (130, GenomicAnnotation::Exon, "Exon 1 of 2"),
+            (175, GenomicAnnotation::Intron, "Intron 1 of 1"),
+            (235, GenomicAnnotation::ThreePrimeUtr, ""),
+            (550, GenomicAnnotation::Downstream, ""),
+            (700, GenomicAnnotation::Intergenic, ""),
+        ];
+
+        for (position, expected_annotation, expected_rank) in expected_annotations {
+            let hit = annotate_genomic_feature(&genes, "chr1", position);
+            assert_eq!(hit.annotation, expected_annotation, "position {position}");
+            assert_eq!(hit.exon_intron_rank, expected_rank, "position {position}");
+            assert_eq!(hit.gene_id, "gene_regions", "position {position}");
+        }
     }
 
     #[test]
@@ -843,6 +986,29 @@ mod tests {
                 .contains("Annotation requires --annotation-dir"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn annotation_summary_rejects_dimension_mismatch() {
+        let records = vec![AnnotationRecord {
+            chr: "chr1".to_string(),
+            start_1based: 101,
+            end_1based: 102,
+            strand: '+',
+            annotation: "Promoter".to_string(),
+            gene_id: "g1".to_string(),
+            gene_symbol: "G1".to_string(),
+            transcript_id: "tx1".to_string(),
+            distance_to_tss: 0,
+            exon_intron_rank: String::new(),
+        }];
+        let coverage = Array2::<u32>::zeros((2, 1));
+        let sample_names = vec!["sample1".to_string()];
+
+        let error =
+            calculate_sample_annotation_summary(&records, &coverage, &sample_names).unwrap_err();
+        assert!(error.to_string().contains("dimensions"));
+        assert!(error.to_string().contains("1 records"));
     }
 
     #[test]

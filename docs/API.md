@@ -17,11 +17,11 @@
 主处理流程模块。
 
 #### 函数
-- `run_pipeline()` - 运行完整的处理流程
-- `find_bismark_files()` - 查找 Bismark 文件
+- `run_pipeline(PipelineConfig)` - 运行完整的处理流程
 
 #### 数据结构
-- `MethrixData` - 甲基化数据容器
+- `PipelineConfig` - pipeline 输入、输出、线程、coverage 和注释选项
+- `MethrixData` - 甲基化数据容器；coverage 使用 `u32`，beta 使用 `f32`
 
 ### `genome::cpg`
 参考基因组和 CpG 提取模块。
@@ -73,9 +73,9 @@
 参考基因组下载模块。
 
 #### 函数
-- `download_genome(genome: &str, output_dir: &str) -> Result<String>`  
+- `download_genome(genome: &str, output_dir: &str) -> Result<String>`
   下载参考基因组
-  
+
   **参数**:
   - `genome`: 基因组名称（hg19, hg38, mm10, mm39）
   - `output_dir`: 输出目录
@@ -97,8 +97,8 @@ Bismark 文件读取模块。
   ```
 
   **方法**:
-  - `total_reads()` -> u32 - 总读段数
-  - `beta_value()` -> Option<f32> - 甲基化水平
+  - `total_reads() -> Result<u32>` - checked coverage 求和，溢出时返回错误
+  - `beta_value() -> Result<Option<f32>>` - 零 coverage 返回 `None`
 
 #### 类
 - `BismarkReader` - Bismark 文件读取器
@@ -113,23 +113,23 @@ Bismark 文件读取模块。
 数据过滤模块。
 
 #### 函数
-- `remove_uncovered(beta_matrix, cov_matrix)`  
+- `remove_uncovered(beta_matrix, cov_matrix)`
   移除所有样本中都未覆盖的位点
-  
+
   **参数**:
   - `beta_matrix`: 甲基化矩阵
   - `cov_matrix`: 覆盖度矩阵
-  
+
   **返回**: 过滤后的矩阵对
 
-- `coverage_filter(cov_matrix, cov_thr, min_samples)`  
+- `coverage_filter(cov_matrix, cov_thr, min_samples)`
   基于覆盖度过滤
-  
+
   **参数**:
   - `cov_matrix`: 覆盖度矩阵
   - `cov_thr`: 最小覆盖度阈值
   - `min_samples`: 最小样本数
-  
+
   **返回**: 布尔向量（保留的位点）
 
 ### `processing::stats`
@@ -141,20 +141,20 @@ Bismark 文件读取模块。
   pub struct SampleStats {
       pub sample_name: String,
       pub n_covered: usize,                    // 覆盖的 CpG 数量
-      pub n_total: usize,                      # 总 CpG 数量
-      pub mean_coverage: f32,                  # 平均覆盖度
-      pub coverage_distribution: Vec<(u16, usize)>, // (阈值, 数量)
+      pub n_total: usize,                     // 总 CpG 数量
+      pub mean_coverage: f32,                 // 平均 coverage
+      pub coverage_distribution: Vec<(u32, usize)>, // (阈值, 数量)
   }
   ```
 
 #### 函数
-- `calculate_coverage_stats(cov_matrix, sample_names)`  
+- `calculate_coverage_stats(cov_matrix, sample_names)`
   计算覆盖度统计
-  
+
   **参数**:
   - `cov_matrix`: 覆盖度矩阵
   - `sample_names`: 样本名称列表
-  
+
   **返回**: `Vec<SampleStats>`
 
 ### `hdf5::se_compat`
@@ -169,38 +169,42 @@ HDF5 SummarizedExperiment 兼容写入模块。
   }
   ```
 
-**H5 文件结构**:
+**H5 schema v2 文件结构**:
 ```
-methrix_data.h5
-├── assays/
-│   ├── beta          # f32 矩阵，甲基化值
-│   └── cov           # u16 矩阵，覆盖度
+assays.h5
+├── beta                 # f32，HDF5 物理布局为 sample × CpG
+├── cov                  # u32，HDF5 物理布局为 sample × CpG
 ├── rowData/
-│   ├── chr           # 字符串数组，染色体
-│   ├── start         # u32 数组，起始位置（0-based）
-│   ├── end           # u32 数组，结束位置
-│   └── strand        # 字符串数组，链（'+'）
+│   ├── chr              # UTF-8 染色体名称（兼容字段）
+│   ├── seqnames         # UTF-8 染色体名称
+│   ├── start            # u32，1-based closed
+│   ├── end              # u32，1-based closed
+│   ├── width            # end - start + 1
+│   └── strand           # UTF-8 链信息
 ├── colData/
-│   └── sample_id     # 字符串数组，样本名称
+│   ├── sample_id        # UTF-8 样本名称（兼容字段）
+│   └── sample_name      # UTF-8 样本名称
 └── metadata/
-    ├── genome        # 标量数据集，参考基因组名称
-    └── is_h5         # 标量数据集，HDF5 格式标志
+    ├── genome           # UTF-8 参考基因组名称
+    └── is_h5            # HDF5 格式标志
 ```
+
+根属性 `se_version` 为 `2`。R/Bioconductor 读取后 assay 逻辑维度为 CpG × sample。
 
 ### `qc::report`
 质量控制报告模块。
 
 #### 函数
-- `generate_coverage_report(output_path, sample_stats)`  
+- `generate_coverage_report(output_path, sample_stats)`
   生成覆盖度统计报告
-  
+
   **参数**:
   - `output_path`: 输出 Excel 文件路径
   - `sample_stats`: 样本统计信息
 
-- `generate_qc_report(input_dir, output_path)`  
+- `generate_qc_report(input_dir, output_path)`
   从 H5 文件生成 QC 报告
-  
+
   **参数**:
   - `input_dir`: H5 文件所在目录
   - `output_path`: 输出 Excel 文件路径
@@ -235,24 +239,26 @@ let records = reader.read()?;
 
 // 处理记录
 for record in records {
-    println!("{}: {} methylation reads", record.chr, record.beta_value());
+    let beta_value = record.beta_value()?;
+    println!("{}: {:?} methylation fraction", record.chr, beta_value);
 }
 ```
 
 ### 示例 3：数据处理流程
 
 ```rust
-use methrix_cli::cli::process::run_pipeline;
+use methrix_cli::cli::process::{run_pipeline, PipelineConfig};
 
-// 运行完整流程
-run_pipeline(
-    "bismark_output/".to_string(),
-    "results/".to_string(),
-    "hg19.fa".to_string(),
-    8,  // 线程数
-    1,  // 最小覆盖度
-    true,  // 移除未覆盖位点
-)?;
+run_pipeline(PipelineConfig {
+    input_dir: "bismark_output/".to_string(),
+    output_dir: "results/".to_string(),
+    genome: "hg19.fa".to_string(),
+    threads: 8,
+    min_coverage: 1,
+    remove_uncovered: true,
+    annotation_dir: Some("annotations/".to_string()),
+    skip_annotation: false,
+})?;
 ```
 
 ## 错误处理
@@ -265,10 +271,10 @@ use anyhow::{Context, Result};
 fn process_data() -> Result<()> {
     let file = File::open("data.txt")
         .context("Failed to open data file")?;
-    
+
     let data = read_data(&file)
         .context("Failed to read data")?;
-    
+
     Ok(())
 }
 ```
@@ -277,13 +283,14 @@ fn process_data() -> Result<()> {
 
 ### CpG 坐标
 
-**内部表示**: 0-based（Rust 标准）  
-**Bismark 格式**: 1-based  
-**H5 输出**: 0-based（与 R 一致）
+**内部表示**: 0-based、半开区间 `[start, end)`
+**Bismark 格式**: 1-based
+**HDF5 rowData**: 1-based、闭区间 `[start, end]`
 
 转换自动处理：
-- 读取 Bismark 文件时：1-based → 0-based
-- 输出到 H5 时：0-based（R 标准）
+- 读取 Bismark 文件时：1-based → 0-based 内部位置
+- 写入 HDF5 时：内部坐标 → R/Bioconductor 的 1-based 闭区间
+- `rowData/width` 始终满足 `end - start + 1`
 
 ## 并发处理
 
@@ -326,9 +333,9 @@ let cpg_data: CpGData = ron::from_str(&ron_string)?;
 
 ### 内存使用
 
-- **u16 vs u32**: 覆盖度使用 u16 节省 50% 内存
-- **f32 vs f64**: 甲基化值使用 f32 节省 50% 内存
-- **内存映射**: 大文件避免完全加载到内存
+- **u32 coverage**: 保留高于 65,535 的深度并对求和溢出返回错误
+- **f32 beta**: 相比 f64 减少约 50% 的矩阵内存
+- **内存映射**: 未压缩 Bismark 文件使用 mmap 读取
 
 ### 并发
 

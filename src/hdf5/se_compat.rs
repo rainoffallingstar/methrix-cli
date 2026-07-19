@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
-use hdf5::types::{VarLenAscii, VarLenUnicode};
+use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group};
 use ndarray::Array2;
+use std::str::FromStr;
 
 pub struct SummarizedExperimentWriter {
     output_path: String,
@@ -91,26 +92,39 @@ impl SummarizedExperimentWriter {
         group: &Group,
         cpg_locations: &[crate::genome::cpg::CpGSite],
     ) -> Result<()> {
-        let chr: Vec<VarLenAscii> = cpg_locations
+        let sequence_names = cpg_locations
             .iter()
-            .map(|cpg| VarLenAscii::from_ascii(&cpg.chr).unwrap())
-            .collect();
+            .enumerate()
+            .map(|(row_index, cpg)| {
+                VarLenUnicode::from_str(&cpg.chr).with_context(|| {
+                    format!(
+                        "Invalid chromosome name at row {}: {:?}",
+                        row_index, cpg.chr
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let start: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.start + 1).collect();
         let end: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.end).collect();
-        let strand: Vec<VarLenAscii> = cpg_locations
+        let strands = cpg_locations
             .iter()
-            .map(|cpg| VarLenAscii::from_ascii(&cpg.strand.to_string()).unwrap())
-            .collect();
+            .enumerate()
+            .map(|(row_index, cpg)| {
+                VarLenUnicode::from_str(&cpg.strand.to_string()).with_context(|| {
+                    format!("Invalid strand at row {}: {:?}", row_index, cpg.strand)
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         group
             .new_dataset_builder()
-            .with_data(&chr)
+            .with_data(&sequence_names)
             .create("chr")
             .context("Failed to create chr dataset")?;
 
         group
             .new_dataset_builder()
-            .with_data(&chr)
+            .with_data(&sequence_names)
             .create("seqnames")
             .context("Failed to create seqnames dataset")?;
 
@@ -139,7 +153,7 @@ impl SummarizedExperimentWriter {
 
         group
             .new_dataset_builder()
-            .with_data(&strand)
+            .with_data(&strands)
             .create("strand")
             .context("Failed to create strand dataset")?;
 
@@ -147,11 +161,18 @@ impl SummarizedExperimentWriter {
     }
 
     fn write_coldata(&self, group: &Group, sample_names: &[String]) -> Result<()> {
-        // Convert to VarLenAscii
-        let names: Vec<VarLenAscii> = sample_names
+        let names = sample_names
             .iter()
-            .map(|s| VarLenAscii::from_ascii(s).unwrap())
-            .collect();
+            .enumerate()
+            .map(|(sample_index, sample_name)| {
+                VarLenUnicode::from_str(sample_name).with_context(|| {
+                    format!(
+                        "Invalid sample name at column {}: {:?}",
+                        sample_index, sample_name
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         group
             .new_dataset_builder()
@@ -169,11 +190,11 @@ impl SummarizedExperimentWriter {
     }
 
     fn write_metadata(&self, group: &Group, genome: &str) -> Result<()> {
-        // genome - use VarLenUnicode for proper string representation in R
-        let genome_str = unsafe { VarLenUnicode::from_str_unchecked(genome) };
+        let genome_string = VarLenUnicode::from_str(genome)
+            .context("Genome metadata contains an invalid string")?;
         group
             .new_dataset_builder()
-            .with_data(&genome_str)
+            .with_data(&genome_string)
             .create("genome")
             .context("Failed to create genome dataset")?;
 
@@ -188,21 +209,19 @@ impl SummarizedExperimentWriter {
     }
 
     fn write_se_attributes(&self, file: &File) -> Result<()> {
-        // HDF5SummarizedExperiment required attributes
-        use hdf5::types::VarLenUnicode;
-
         let attr = file
             .new_attr::<u32>()
             .create("se_version")
             .context("Failed to create se_version attribute")?;
         attr.write_scalar(&2)?;
 
-        let delayed_array_str = unsafe { VarLenUnicode::from_str_unchecked("HDF5Array") };
+        let delayed_array_type =
+            VarLenUnicode::from_str("HDF5Array").context("Failed to encode delayed array type")?;
         let attr = file
             .new_attr::<VarLenUnicode>()
             .create("delayed_array_type")
             .context("Failed to create delayed_array_type attribute")?;
-        attr.write_scalar(&delayed_array_str)?;
+        attr.write_scalar(&delayed_array_type)?;
 
         Ok(())
     }
@@ -213,7 +232,7 @@ mod tests {
     use super::SummarizedExperimentWriter;
     use crate::cli::process::MethrixData;
     use crate::genome::cpg::CpGSite;
-    use hdf5::types::VarLenAscii;
+    use hdf5::types::VarLenUnicode;
     use ndarray::Array2;
     use tempfile::tempdir;
 
@@ -226,20 +245,20 @@ mod tests {
             cov_matrix: Array2::from_shape_vec((2, 2), vec![70_000, 2, 3, 4]).unwrap(),
             cpg_locations: vec![
                 CpGSite {
-                    chr: "chr1".to_string(),
+                    chr: "chr一".to_string(),
                     start: 9,
                     end: 11,
                     strand: '+',
                 },
                 CpGSite {
-                    chr: "chr2".to_string(),
+                    chr: "chrÉ".to_string(),
                     start: 19,
                     end: 21,
                     strand: '+',
                 },
             ],
-            sample_names: vec!["sample_a".to_string(), "sample_b".to_string()],
-            genome: "hg38".to_string(),
+            sample_names: vec!["样本甲".to_string(), "échantillon_b".to_string()],
+            genome: "人类-hg38".to_string(),
         };
 
         SummarizedExperimentWriter::new(output_path.to_string_lossy().into_owned())
@@ -287,12 +306,12 @@ mod tests {
             row_data
                 .dataset("seqnames")
                 .unwrap()
-                .read_raw::<VarLenAscii>()
+                .read_raw::<VarLenUnicode>()
                 .unwrap()
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            vec!["chr1", "chr2"]
+            vec!["chr一", "chrÉ"]
         );
 
         let column_data = file.group("colData").unwrap();
@@ -300,12 +319,12 @@ mod tests {
             column_data
                 .dataset("sample_name")
                 .unwrap()
-                .read_raw::<VarLenAscii>()
+                .read_raw::<VarLenUnicode>()
                 .unwrap()
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            vec!["sample_a", "sample_b"]
+            vec!["样本甲", "échantillon_b"]
         );
     }
 }

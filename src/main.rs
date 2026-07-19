@@ -175,7 +175,8 @@ fn main() -> anyhow::Result<()> {
             info!("Downloading genome: {}", genome);
             #[cfg(feature = "download")]
             {
-                methrix_cli::genome::download::download_genome(&genome, &output_directory)
+                methrix_cli::genome::download::download_genome(&genome, &output_directory)?;
+                Ok(())
             }
             #[cfg(not(feature = "download"))]
             {

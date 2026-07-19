@@ -5,10 +5,6 @@ use std::path::Path;
 /// Enabled via `cargo build --features download`.
 #[cfg(feature = "download")]
 pub fn download_genome(genome: &str, output_dir: &str) -> anyhow::Result<String> {
-    use anyhow::Context;
-    use std::fs::File;
-    use std::io::copy;
-
     let url =
         get_genome_url(genome).ok_or_else(|| anyhow::anyhow!("Unknown genome: {}", genome))?;
 
@@ -75,4 +71,18 @@ fn download_file(url: &str, output_path: &Path) -> anyhow::Result<()> {
     copy(&mut bytes.as_ref(), &mut file)?;
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "download"))]
+mod tests {
+    use super::get_genome_url;
+
+    #[test]
+    fn resolves_supported_ucsc_genomes_case_insensitively() {
+        assert_eq!(
+            get_genome_url("HG38"),
+            Some("https://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz")
+        );
+        assert!(get_genome_url("unsupported").is_none());
+    }
 }

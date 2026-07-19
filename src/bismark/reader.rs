@@ -14,16 +14,26 @@ pub struct BismarkRecord {
 }
 
 impl BismarkRecord {
-    pub fn total_reads(&self) -> u32 {
-        self.methylated_reads + self.unmethylated_reads
+    pub fn total_reads(&self) -> Result<u32> {
+        self.methylated_reads
+            .checked_add(self.unmethylated_reads)
+            .with_context(|| {
+                format!(
+                    "Coverage overflow for {}:{}: {} + {} exceeds u32",
+                    self.chr,
+                    self.start.saturating_add(1),
+                    self.methylated_reads,
+                    self.unmethylated_reads
+                )
+            })
     }
 
-    pub fn beta_value(&self) -> Option<f32> {
-        let total_reads = self.total_reads();
+    pub fn beta_value(&self) -> Result<Option<f32>> {
+        let total_reads = self.total_reads()?;
         if total_reads == 0 {
-            None
+            Ok(None)
         } else {
-            Some(self.methylated_reads as f32 / total_reads as f32)
+            Ok(Some(self.methylated_reads as f32 / total_reads as f32))
         }
     }
 }
@@ -224,8 +234,8 @@ mod tests {
         assert_eq!(record.start, 10468);
         assert_eq!(record.methylated_reads, 2);
         assert_eq!(record.unmethylated_reads, 8);
-        assert_eq!(record.total_reads(), 10);
-        assert_eq!(record.beta_value(), Some(0.2));
+        assert_eq!(record.total_reads().unwrap(), 10);
+        assert_eq!(record.beta_value().unwrap(), Some(0.2));
     }
 
     #[test]
@@ -235,8 +245,39 @@ mod tests {
             .parse_line("chr1\t10\t10\t50.000000\t35000\t35000", 1)
             .unwrap();
 
-        assert_eq!(record.total_reads(), 70_000);
-        assert_eq!(record.beta_value(), Some(0.5));
+        assert_eq!(record.total_reads().unwrap(), 70_000);
+        assert_eq!(record.beta_value().unwrap(), Some(0.5));
+    }
+
+    #[test]
+    fn rejects_overflow_from_direct_record_construction() {
+        let record = BismarkRecord {
+            chr: "chr1".to_string(),
+            start: 9,
+            methylated_reads: u32::MAX,
+            unmethylated_reads: 1,
+        };
+
+        let total_error = record.total_reads().unwrap_err();
+        assert!(total_error.to_string().contains("Coverage overflow"));
+        assert!(record
+            .beta_value()
+            .unwrap_err()
+            .to_string()
+            .contains("Coverage overflow"));
+    }
+
+    #[test]
+    fn accepts_maximum_u32_total_coverage() {
+        let record = BismarkRecord {
+            chr: "chr1".to_string(),
+            start: 9,
+            methylated_reads: u32::MAX - 1,
+            unmethylated_reads: 1,
+        };
+
+        assert_eq!(record.total_reads().unwrap(), u32::MAX);
+        assert!(record.beta_value().unwrap().unwrap().is_finite());
     }
 
     #[test]

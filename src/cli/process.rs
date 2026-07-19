@@ -133,11 +133,11 @@ impl MethrixProcessor {
             if let Some(&reference_index) = self.cpg_index.get(&key) {
                 matched_records += 1;
                 matched_contigs.insert(key.0.clone());
-                let total_reads = record.total_reads();
+                let total_reads = record.total_reads()?;
                 if total_reads >= min_coverage && total_reads > 0 {
                     coverage_values[reference_index] = total_reads;
                     beta_values[reference_index] = record
-                        .beta_value()
+                        .beta_value()?
                         .context("Non-zero coverage unexpectedly produced no beta value")?;
                 }
             }
@@ -184,7 +184,7 @@ struct ProcessedSample {
     coverage_values: Vec<u32>,
 }
 
-fn canonical_contig_name(contig: &str) -> String {
+pub(crate) fn canonical_contig_name(contig: &str) -> String {
     let trimmed_contig = contig.trim();
     let without_prefix = trimmed_contig
         .strip_prefix("chr")
@@ -388,6 +388,119 @@ mod tests {
             "sample"
         );
         assert_eq!(extract_sample_name("/tmp/sample.cov").unwrap(), "sample");
+    }
+
+    #[test]
+    fn runs_complete_pipeline_with_temporary_fixture() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use hdf5::types::VarLenUnicode;
+        use tempfile::tempdir;
+
+        let temporary_directory = tempdir().unwrap();
+        let input_directory = temporary_directory.path().join("input");
+        let output_directory = temporary_directory.path().join("output");
+        let annotation_directory = temporary_directory.path().join("annotations");
+        fs::create_dir_all(&input_directory).unwrap();
+        fs::create_dir_all(&annotation_directory).unwrap();
+
+        let cpg_data = CpGData {
+            cpgs: vec![
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 9,
+                    end: 11,
+                    strand: '+',
+                },
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 19,
+                    end: 21,
+                    strand: '+',
+                },
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 29,
+                    end: 31,
+                    strand: '+',
+                },
+            ],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 100,
+            }],
+            release_name: "mini".to_string(),
+        };
+        let genome_path = temporary_directory.path().join("mini.ron");
+        fs::write(&genome_path, ron::ser::to_string(&cpg_data).unwrap()).unwrap();
+
+        fs::write(
+            input_directory.join("sample_a.cov"),
+            "chr1\t10\t10\t50.000000\t35000\t35000\nchr1\t20\t20\t100.000000\t5\t0\n",
+        )
+        .unwrap();
+        fs::write(
+            input_directory.join("sample_b.cov"),
+            "1\t20\t20\t0.000000\t0\t5\n1\t30\t30\t25.000000\t1\t3\n",
+        )
+        .unwrap();
+        fs::write(
+            annotation_directory.join("mini.gtf"),
+            concat!(
+                "chr1\ttest\ttranscript\t1\t40\t.\t+\t.\tgene_id \"g1\"; transcript_id \"tx1\"; gene_name \"G1\";\n",
+                "chr1\ttest\texon\t15\t25\t.\t+\t.\tgene_id \"g1\"; transcript_id \"tx1\"; gene_name \"G1\";\n"
+            ),
+        )
+        .unwrap();
+
+        run_pipeline(PipelineConfig {
+            input_dir: input_directory.to_string_lossy().into_owned(),
+            output_dir: output_directory.to_string_lossy().into_owned(),
+            genome: genome_path.to_string_lossy().into_owned(),
+            threads: 2,
+            min_coverage: 1,
+            remove_uncovered: true,
+            annotation_dir: Some(annotation_directory.to_string_lossy().into_owned()),
+            skip_annotation: false,
+        })
+        .unwrap();
+
+        let assays_path = output_directory.join("assays.h5");
+        let compatibility_path = output_directory.join("methrix_data.h5");
+        assert!(assays_path.is_file());
+        assert!(compatibility_path.is_file());
+        assert!(output_directory.join("CpG_coverage.xlsx").is_file());
+        assert!(output_directory
+            .join("CpG_annotation_report.xlsx")
+            .is_file());
+
+        let file = hdf5::File::open(assays_path).unwrap();
+        let coverage_dataset = file.dataset("cov").unwrap();
+        assert_eq!(coverage_dataset.shape(), vec![2, 3]);
+        assert_eq!(
+            coverage_dataset.read_raw::<u32>().unwrap(),
+            vec![70_000, 5, 0, 0, 5, 4]
+        );
+        assert_eq!(
+            file.group("rowData")
+                .unwrap()
+                .dataset("start")
+                .unwrap()
+                .read_raw::<u32>()
+                .unwrap(),
+            vec![10, 20, 30]
+        );
+        assert_eq!(
+            file.group("colData")
+                .unwrap()
+                .dataset("sample_name")
+                .unwrap()
+                .read_raw::<VarLenUnicode>()
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["sample_a", "sample_b"]
+        );
     }
 
     #[test]

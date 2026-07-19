@@ -86,16 +86,10 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
         .context("Failed to open colData group")?;
 
     let sample_dataset = coldata_group
-        .dataset("sample_id")
-        .context("Failed to open sample_id dataset")?;
-    let sample_ids: Vec<hdf5::types::VarLenAscii> = sample_dataset
-        .read_raw()
-        .context("Failed to read sample IDs")?;
-
-    let sample_names: Vec<String> = sample_ids
-        .iter()
-        .map(|s: &hdf5::types::VarLenAscii| s.to_string())
-        .collect();
+        .dataset("sample_name")
+        .or_else(|_| coldata_group.dataset("sample_id"))
+        .context("Failed to open sample_name or sample_id dataset")?;
+    let sample_names = read_hdf5_strings(&sample_dataset, "sample names")?;
 
     let cov_matrix: Vec<u32> = cov_dataset
         .read_raw()
@@ -116,6 +110,17 @@ pub fn generate_qc_report(input_dir: &str, output_path: &str) -> Result<()> {
 
     // Generate report
     generate_coverage_report(output_path, &stats)
+}
+
+fn read_hdf5_strings(dataset: &hdf5::Dataset, field_name: &str) -> Result<Vec<String>> {
+    if let Ok(values) = dataset.read_raw::<hdf5::types::VarLenUnicode>() {
+        return Ok(values.iter().map(ToString::to_string).collect());
+    }
+
+    let values = dataset
+        .read_raw::<hdf5::types::VarLenAscii>()
+        .with_context(|| format!("Failed to read {} as UTF-8 or ASCII strings", field_name))?;
+    Ok(values.iter().map(ToString::to_string).collect())
 }
 
 fn reshape_cov_by_sample(raw: &[u32], shape: &[usize], n_samples: usize) -> Result<Vec<Vec<u32>>> {
