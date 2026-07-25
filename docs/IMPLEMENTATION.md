@@ -1,8 +1,8 @@
-# Methrix CLI - Implementation Summary
+# methx - Implementation Summary
 
 ## Overview
 
-Methrix CLI is a high-performance Rust command-line tool that processes Bismark bisulfite sequencing data into methrix-compatible HDF5 format. It provides a complete alternative to the original R script with significant performance improvements and no R runtime dependency.
+methx is a high-performance Rust command-line tool that processes Bismark bisulfite sequencing data into methrix-compatible HDF5 format. It provides a complete alternative to the original R script with significant performance improvements and no R runtime dependency.
 
 ## What Was Built
 
@@ -41,22 +41,22 @@ Methrix CLI is a high-performance Rust command-line tool that processes Bismark 
 
 ```bash
 # Main processing command
-methrix process -i <input> -o <output> -g <genome> [OPTIONS]
+methx process -i <input> -o <output> -g <genome> [OPTIONS]
 
 # Extract CpG sites (optional optimization)
-methrix extract-cpgs -g <genome> -o <output.ron> [OPTIONS]
+methx extract-cpgs -g <genome> -o <output.ron> [OPTIONS]
 
 # Download reference genomes
-methrix download-genome -g <hg19|hg38|mm10|mm39> -o <dir>
+methx download-genome -g <hg19|hg38|mm10|mm39> -o <dir>
 
 # Generate QC report
-methrix qc-report -i <h5_dir> -o <output.xlsx>
+methx qc-report -i <h5_dir> -o <output.xlsx>
 ```
 
 ## Project Structure
 
 ```
-methrix-cli/
+methx/
 ├── Cargo.toml              # Project configuration
 ├── README.md                # User documentation
 ├── src/
@@ -123,7 +123,7 @@ methrix-cli/
 cargo build --release
 
 # Process Bismark data
-./target/release/methrix process \
+./target/release/methx process \
   --input bismark_output/ \
   --output results/ \
   --genome hg19.fa \

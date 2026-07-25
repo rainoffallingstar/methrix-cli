@@ -1,8 +1,8 @@
-# Methrix CLI - Quick Start Guide
+# methx - Quick Start Guide
 
 ## Overview
 
-Methrix CLI is a high-performance command-line tool for processing Bismark bisulfite sequencing data into methrix-compatible HDF5 format. It provides a Rust-based alternative to the original R script with significant performance improvements.
+methx is a high-performance command-line tool for processing Bismark bisulfite sequencing data into methrix-compatible HDF5 format. It provides a Rust-based alternative to the original R script with significant performance improvements.
 
 ## Key Features
 
@@ -18,17 +18,17 @@ Methrix CLI is a high-performance command-line tool for processing Bismark bisul
 
 ```bash
 # From methrix repository
-cd methrix/methrix-cli
+cd methx
 cargo build --release
 
-# Binary is at: target/release/methrix
+# Binary is at: target/release/methx
 ```
 
 ### 2. Basic Usage
 
 ```bash
 # Process Bismark output files
-./methrix process \
+./methx process \
   --input bismark_output/ \
   --output results/ \
   --genome hg19.fa \
@@ -54,7 +54,7 @@ plot_coverage(m)
 
 ```bash
 # 1. Process with FASTA (CpG extraction happens on-the-fly)
-methrix process \
+methx process \
   --input bismark_output/ \
   --output results/ \
   --genome /path/to/hg19.fa \
@@ -65,23 +65,23 @@ methrix process \
 
 ```bash
 # 1. Extract CpGs once
-methrix extract-cpgs \
+methx extract-cpgs \
   --genome /path/to/hg19.fa \
   --output hg19_cpgs.ron
 
 # 2. Process multiple datasets using pre-extracted CpGs
-methrix process --input batch1/ --output out1/ --genome hg19_cpgs.ron
-methrix process --input batch2/ --output out2/ --genome hg19_cpgs.ron
+methx process --input batch1/ --output out1/ --genome hg19_cpgs.ron
+methx process --input batch2/ --output out2/ --genome hg19_cpgs.ron
 ```
 
 ### Option 3: Download built-in genome
 
 ```bash
 # 1. Download genome
-methrix download-genome --genome hg19 --output genomes/
+methx download-genome --genome hg19 --output genomes/
 
 # 2. Process
-methrix process \
+methx process \
   --input bismark_output/ \
   --output results/ \
   --genome genomes/hg19.fa
@@ -89,12 +89,12 @@ methrix process \
 
 ## Commands Reference
 
-### `methrix process`
+### `methx process`
 
 Main command to process Bismark files.
 
 ```bash
-methrix process [OPTIONS]
+methx process [OPTIONS]
 
 Required:
   -i, --input <DIR>      Directory with *.bismark.cov.gz files
@@ -108,12 +108,12 @@ Optional:
   -v, --verbose          Enable debug logging
 ```
 
-### `methrix extract-cpgs`
+### `methx extract-cpgs`
 
 Extract CpG sites from reference genome (optional optimization).
 
 ```bash
-methrix extract-cpgs [OPTIONS]
+methx extract-cpgs [OPTIONS]
 
 Required:
   -g, --genome <GENOME>  FASTA file
@@ -124,24 +124,24 @@ Optional:
   -v, --verbose          Enable debug logging
 ```
 
-### `methrix download-genome`
+### `methx download-genome`
 
 Download reference genomes from UCSC.
 
 ```bash
-methrix download-genome [OPTIONS]
+methx download-genome [OPTIONS]
 
 Required:
   -g, --genome <GENOME>  Genome name: hg19, hg38, mm10, mm39
   -o, --output <DIR>     Output directory
 ```
 
-### `methrix qc-report`
+### `methx qc-report`
 
 Generate QC report from existing H5 file.
 
 ```bash
-methrix qc-report [OPTIONS]
+methx qc-report [OPTIONS]
 
 Required:
   -i, --input <DIR>      Directory with methrix H5 file
@@ -191,7 +191,7 @@ Processing 100 samples (~10M CpGs each):
 | Implementation | Time | Memory |
 |----------------|------|--------|
 | R script | ~45 min | ~8 GB |
-| methrix-cli | ~5 min | ~4 GB |
+| methx | ~5 min | ~4 GB |
 
 ### Optimization Tips
 
@@ -230,7 +230,7 @@ m <- load_HDF5_methrix("methrix_data.h5")
 ### Example 1: Small dataset
 
 ```bash
-methrix process \
+methx process \
   --input small_project/bismark/ \
   --output small_project/results/ \
   --genome hg19.fa \
@@ -241,12 +241,12 @@ methrix process \
 
 ```bash
 # Step 1: Extract CpGs (once)
-methrix extract-cpgs \
+methx extract-cpgs \
   --genome hg38.fa \
   --output hg38_cpgs.ron
 
 # Step 2: Process
-methrix process \
+methx process \
   --input large_bismark/ \
   --output results/ \
   --genome hg38_cpgs.ron \
@@ -258,7 +258,7 @@ methrix process \
 ### Example 3: Generate QC report only
 
 ```bash
-methrix qc-report \
+methx qc-report \
   --input existing_results/ \
   --output qc_report.xlsx
 ```
@@ -284,5 +284,5 @@ region_summary <- get_region_summary(m, regions = promoters)
 
 ## Support
 
-- **Issues**: https://github.com/CompEpigen/methrix/issues
+- **Issues**: https://github.com/rainoffallingstar/methx/issues
 - **Documentation**: See `docs/` directory

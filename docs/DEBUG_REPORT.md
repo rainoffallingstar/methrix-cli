@@ -1,4 +1,4 @@
-# Methrix CLI 测试状态报告
+# methx 测试状态报告
 
 ## 📊 当前状态
 
@@ -8,7 +8,7 @@
 ## ✅ 已完成的工作
 
 1. **项目编译成功**
-   - 二进制文件: `target/release/methrix` (3.6MB)
+   - 二进制文件: `target/release/methx` (3.6MB)
    - 使用 HDF5 1.10.6
    - Conda 环境: rust_build
 
@@ -68,7 +68,7 @@ CpG 数据已经提取完成，可以直接使用：
 
 ```bash
 # 手动运行处理命令
-./target/release/methrix process \
+./target/release/methx process \
   --input testdata/mCall \
   --output testdata/mCall/rust_output_final \
   --genome hg19 \
@@ -86,7 +86,7 @@ CpG 数据已经提取完成，可以直接使用：
 直接使用 FASTA 文件（每次会重新提取 CpG）：
 
 ```bash
-./target/release/methrix process \
+./target/release/methx process \
   --input testdata/mCall \
   --output testdata/mCall/rust_output_final \
   --genome testdata/genomes/hg19.fa \

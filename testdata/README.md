@@ -42,8 +42,8 @@ cp /path/to/your/*.bismark.cov.gz testdata/samples/
 ### 方法 3: 下载参考基因组
 
 ```bash
-# 使用 methrix-cli 下载
-./target/release/methrix download-genome \
+# 使用 methx 下载
+./target/release/methx download-genome \
     --genome hg19 \
     --output testdata/genomes/
 
@@ -58,7 +58,7 @@ gunzip testdata/genomes/hg19.fa.gz
 
 ```bash
 # 从基因组提取 CpG 位点
-./target/release/methrix extract-cpgs \
+./target/release/methx extract-cpgs \
     --genome testdata/genomes/hg19.fa \
     --output testdata/genomes/hg19_cpgs.ron
 ```
@@ -88,7 +88,7 @@ testdata/
 
 ```bash
 # 使用 2 个样本测试
-./target/release/methrix process \
+./target/release/methx process \
     --input testdata/samples/ \
     --output testdata/output/ \
     --genome testdata/genomes/hg19_cpgs.ron \
@@ -99,7 +99,7 @@ testdata/
 
 ```bash
 # 使用所有样本测试
-./target/release/methrix process \
+./target/release/methx process \
     --input testdata/samples/ \
     --output testdata/output/ \
     --genome testdata/genomes/hg19_cpgs.ron \

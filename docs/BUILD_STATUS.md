@@ -1,10 +1,10 @@
-# Methrix CLI - 编译成功报告
+# methx - 编译成功报告
 
 ## 🎉 编译状态
 
 **状态**: ✅ 编译成功
 
-**二进制文件**: `/public3/home/scg9946/methrix-cli/target/release/methrix` (3.6 MB)
+**二进制文件**: `/public3/home/scg9946/methx/target/release/methx` (3.6 MB)
 
 **编译环境**:
 - Rust 工具链: stable-x86_64-unknown-linux-gnu
@@ -13,7 +13,7 @@
 
 ## 📋 项目概述
 
-Methrix CLI 是一个高性能的 Rust 命令行工具，用于将 Bismark 亚硫酸氢盐测序数据处理成与 R methrix 包兼容的 HDF5 格式。
+methx 是一个高性能的 Rust 命令行工具，用于将 Bismark 亚硫酸氢盐测序数据处理成与 R methrix 包兼容的 HDF5 格式。
 
 ## 🔧 已修复的编译问题
 
@@ -48,7 +48,7 @@ Methrix CLI 是一个高性能的 Rust 命令行工具，用于将 Bismark 亚�
 ## 📦 可用命令
 
 ```bash
-$ methrix --help
+$ methx --help
 High-performance methylation data processor
 
 Commands:
@@ -89,9 +89,9 @@ Commands:
 
 ## 📁 测试数据位置
 
-- **Bismark 输入文件**: `/public3/home/scg9946/methrix-cli/testdata/mCall/*.bismark.cov.gz`
-- **R methrix 输出**: `/public3/home/scg9946/methrix-cli/testdata/mCall/methrixh5/`
-- **预期输出**: `/public3/home/scg9946/methrix-cli/testdata/mCall/rust_output/`
+- **Bismark 输入文件**: `/public3/home/scg9946/methx/testdata/mCall/*.bismark.cov.gz`
+- **R methrix 输出**: `/public3/home/scg9946/methx/testdata/mCall/methrixh5/`
+- **预期输出**: `/public3/home/scg9946/methx/testdata/mCall/rust_output/`
 
 ## 🔍 关键技术实现
 

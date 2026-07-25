@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Methrix CLI is a high-performance Rust command-line tool for processing Bismark bisulfite sequencing data into a versioned custom HDF5 schema. It is a Rust-native processing alternative inspired by the methrix R package, with direct R interoperability through `rhdf5` dataset access.
+methx is a high-performance Rust command-line tool for processing Bismark bisulfite sequencing data into a versioned custom HDF5 schema. It is a Rust-native processing alternative inspired by the methrix R package, with direct R interoperability through `rhdf5` dataset access.
 
-**Key constraint**: Generated files MUST satisfy `methrix-cli.custom-hdf5/1.0.0`, pass the Rust-native validator before publication, and truthfully identify their loader contract. They are not standard `saveHDF5SummarizedExperiment()` directories and MUST NOT be described as directly loadable by `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
+**Key constraint**: Generated files MUST satisfy `methx.custom-hdf5/1.0.0`, pass the Rust-native validator before publication, and truthfully identify their loader contract. They are not standard `saveHDF5SummarizedExperiment()` directories and MUST NOT be described as directly loadable by `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
 
 ## Build and Development Commands
 
@@ -25,8 +25,8 @@ cargo build --all-targets --all-features --locked
 cargo bench                  # Run benchmarks when performance changes
 
 # Running the tool
-./target/release/methrix --help
-./target/release/methrix process --input <dir> --output <dir> --genome <genome>
+./target/release/methx --help
+./target/release/methx process --input <dir> --output <dir> --genome <genome>
 ```
 
 ## System Dependencies
@@ -161,7 +161,7 @@ The Rust implementation ports these specific R functions from the methrix packag
 
 ## HDF5 Output Structure
 
-The primary `assays.h5` and identical `methrix_data.h5` alias use the versioned `methrix-cli.custom-hdf5/1.0.0` contract. Direct `rhdf5` access is supported; standard HDF5Array and methrix loaders are explicitly unsupported.
+The primary `assays.h5` and identical `methrix_data.h5` alias use the versioned `methx.custom-hdf5/1.0.0` contract. Direct `rhdf5` access is supported; standard HDF5Array and methrix loaders are explicitly unsupported.
 
 ```
 assays.h5
@@ -213,16 +213,16 @@ assays.h5
 
 ```bash
 # Main processing command
-methrix process -i <input> -o <output> -g <genome> [OPTIONS]
+methx process -i <input> -o <output> -g <genome> [OPTIONS]
 
 # Extract CpG sites (optimization - one-time per genome)
-methrix extract-cpgs -g <genome> -o <output.ron> [OPTIONS]
+methx extract-cpgs -g <genome> -o <output.ron> [OPTIONS]
 
 # Download reference genomes
-methrix download-genome -g <hg19|hg38|mm10|mm39> -o <dir>
+methx download-genome -g <hg19|hg38|mm10|mm39> -o <dir>
 
 # Generate QC report
-methrix qc-report -i <h5_dir> -o <output.xlsx>
+methx qc-report -i <h5_dir> -o <output.xlsx>
 ```
 
 ## Testing Infrastructure

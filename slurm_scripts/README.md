@@ -1,6 +1,6 @@
 # SLURM 脚本目录
 
-本目录包含用于在 SLURM 集群上运行 methrix-cli 的脚本。
+本目录包含用于在 SLURM 集群上运行 methx 的脚本。
 
 ## 🖥️ 关于 SLURM
 
@@ -76,7 +76,7 @@ SLURM (Simple Linux Utility for Resource Management) 是一个 Linux 集群管�
 
 ### 1. 提交任务
 ```bash
-cd /path/to/methrix-cli
+cd /path/to/methx
 ./slurm_scripts/submit_test.sh
 ```
 
@@ -92,10 +92,10 @@ squeue -j <JOB_ID>
 ### 3. 查看日志
 ```bash
 # 查看输出日志
-tail -f logs/methrix_*_<JOB_ID>.out
+tail -f logs/methx_*_<JOB_ID>.out
 
 # 查看错误日志
-tail -f logs/methrix_*_<JOB_ID>.err
+tail -f logs/methx_*_<JOB_ID>.err
 ```
 
 ### 4. 取消任务
@@ -126,13 +126,13 @@ scancel -u $USER
 ### 日志管理
 ```bash
 # 查看输出
-cat logs/methrix_*_<JOB_ID>.out
+cat logs/methx_*_<JOB_ID>.out
 
 # 查看错误
-cat logs/methrix_*_<JOB_ID>.err
+cat logs/methx_*_<JOB_ID>.err
 
 # 实时监控
-tail -f logs/methrix_*_<JOB_ID>.out
+tail -f logs/methx_*_<JOB_ID>.out
 ```
 
 ### 资源查看
@@ -152,7 +152,7 @@ sinfo
 ### 基本模板
 ```bash
 #!/bin/bash
-#SBATCH --job-name=methrix_test      # 任务名称
+#SBATCH --job-name=methx_test      # 任务名称
 #SBATCH --output=logs/%j.out         # 输出日志
 #SBATCH --error=logs/%j.err          # 错误日志
 #SBATCH --cpus-per-task=8            # CPU 核心数
@@ -161,7 +161,7 @@ sinfo
 #SBATCH --partition=normal           # 分区
 
 # 你的命令
-./target/release/methrix process \
+./target/release/methx process \
     --input data/ \
     --output output/ \
     --genome hg38
@@ -170,7 +170,7 @@ sinfo
 ### 高级模板
 ```bash
 #!/bin/bash
-#SBATCH --job-name=methrix_test
+#SBATCH --job-name=methx_test
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
 #SBATCH --cpus-per-task=16
@@ -193,7 +193,7 @@ export HDF5_DIR=$CONDA_PREFIX
 # 运行任务
 echo "开始时间: $(date)"
 
-./target/release/methrix process \
+./target/release/methx process \
     --input data/ \
     --output output/ \
     --genome hg38 \

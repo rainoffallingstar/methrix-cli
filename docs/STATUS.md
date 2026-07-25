@@ -1,4 +1,4 @@
-# Methrix CLI 实施状态报告
+# methx 实施状态报告
 
 ## 项目状态
 
@@ -30,7 +30,7 @@
 
 **process 命令** - 主数据处理命令
 ```rust
-methrix process \
+methx process \
   --input <DIR> \
   --output <DIR> \
   --genome <GENOME> \
@@ -41,7 +41,7 @@ methrix process \
 
 **extract-cpgs 命令** - CpG 位点提取
 ```rust
-methrix extract-cpgs \
+methx extract-cpgs \
   --genome <FASTA> \
   --output <RON> \
   --contigs <LIST>
@@ -49,14 +49,14 @@ methrix extract-cpgs \
 
 **download-genome 命令** - 基因组下载
 ```rust
-methrix download-genome \
+methx download-genome \
   --genome <hg19|hg38|mm10|mm39> \
   --output <DIR>
 ```
 
 **qc-report 命令** - QC 报告生成
 ```rust
-methrix qc-report \
+methx qc-report \
   --input <H5_DIR> \
   --output <EXCEL>
 ```
@@ -252,7 +252,7 @@ methrix_pca(m)
 cargo build --release
 
 # 2. 处理 Bismark 数据
-./target/release/methrix process \
+./target/release/methx process \
   --input bismark_output/ \
   --output results/ \
   --genome hg19.fa \
@@ -263,17 +263,17 @@ cargo build --release
 
 ```bash
 # 1. 预提取 CpG（一次性）
-./target/release/methrix extract-cpgs \
+./target/release/methx extract-cpgs \
   --genome hg19.fa \
   --output hg19_cpgs.ron
 
 # 2. 多次使用预提取数据
-./target/release/methrix process \
+./target/release/methx process \
   --input batch1/ \
   --output out1/ \
   --genome hg19_cpgs.ron
 
-./target/release/methrix process \
+./target/release/methx process \
   --input batch2/ \
   --output out2/ \
   --genome hg19_cpgs.ron
@@ -363,8 +363,8 @@ cross build --target x86_64-apple-darwin --release
 
 ```bash
 # 克隆仓库
-git clone https://github.com/CompEpigen/methrix.git
-cd methrix/methrix-cli
+git clone https://github.com/rainoffallingstar/methx.git
+cd methx
 
 # 安装 Rust 工具链
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -388,7 +388,7 @@ cargo build
 
 ## 总结
 
-Methrix CLI v0.1.0 是一个功能完整的命令行工具，成功实现了：
+methx v0.1.0 是一个功能完整的命令行工具，成功实现了：
 
 ✅ **完全独立于 R** 的数据处理流程  
 ✅ **高性能**的 Bismark 到 HDF5 转换  

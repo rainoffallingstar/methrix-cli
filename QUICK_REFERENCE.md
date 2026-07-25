@@ -45,7 +45,7 @@ cargo test
 ## 📊 项目结构
 
 ```
-methrix-cli/
+methx/
 ├── docs/              # 📚 所有文档
 │   ├── INDEX.md      # 从这里开始
 │   └── r_scripts/    # R 脚本

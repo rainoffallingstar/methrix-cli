@@ -1,8 +1,8 @@
-# Methrix CLI API 文档
+# methx API 文档
 
 ## 模块索引
 
-### `methrix_cli`
+### `methx`
 主库入口，重新导出核心功能。
 
 #### 重新导出
@@ -214,7 +214,7 @@ assays.h5
 ### 示例 1：提取 CpG 位点
 
 ```rust
-use methrix_cli::genome::cpg::CpGExtractor;
+use methx::genome::cpg::CpGExtractor;
 
 // 创建提取器
 let extractor = CpGExtractor::new("hg19.fa".to_string());
@@ -229,7 +229,7 @@ extractor.save("hg19_cpgs.ron")?;
 ### 示例 2：读取 Bismark 文件
 
 ```rust
-use methrix_cli::bismark::BismarkReader;
+use methx::bismark::BismarkReader;
 
 // 创建读取器
 let reader = BismarkReader::new("sample.bismark.cov.gz".to_string());
@@ -247,7 +247,7 @@ for record in records {
 ### 示例 3：数据处理流程
 
 ```rust
-use methrix_cli::cli::process::{run_pipeline, PipelineConfig};
+use methx::cli::process::{run_pipeline, PipelineConfig};
 
 run_pipeline(PipelineConfig {
     input_dir: "bismark_output/".to_string(),

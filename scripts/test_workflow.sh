@@ -1,20 +1,20 @@
 #!/bin/bash
-# Test workflow script for methrix-cli
+# Test workflow script for methx
 # This script tests the complete pipeline with real data
 
 set -e
 
 # Paths
-TESTDATA_DIR="/public3/home/scg9946/methrix-cli/testdata/mCall"
-OUTPUT_DIR="/public3/home/scg9946/methrix-cli/testdata/mCall/rust_output"
-BINARY="/public3/home/scg9946/methrix-cli/target/release/methrix"
+TESTDATA_DIR="/public3/home/scg9946/methx/testdata/mCall"
+OUTPUT_DIR="/public3/home/scg9946/methx/testdata/mCall/rust_output"
+BINARY="/public3/home/scg9946/methx/target/release/methx"
 
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}=== Methrix CLI Test Workflow ===${NC}\n"
+echo -e "${YELLOW}=== methx Test Workflow ===${NC}\n"
 
 # Check if binary exists
 if [ ! -f "$BINARY" ]; then

@@ -107,7 +107,7 @@ output_dir/
 
 ### 我们的生成方式
 
-**Rust methrix-cli**:
+**Rust methx**:
 ```
 Rust 处理
     ↓

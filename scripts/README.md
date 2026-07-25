@@ -1,13 +1,13 @@
 # Scripts 目录
 
-本目录包含用于构建、测试和开发 methrix-cli 的实用脚本。
+本目录包含用于构建、测试和开发 methx 的实用脚本。
 
 ## 📋 脚本列表
 
 ### 构建脚本
 
 #### `build.sh`
-**用途**: 使用 conda 环境构建 methrix-cli
+**用途**: 使用 conda 环境构建 methx
 
 **功能**:
 - 自动创建或激活 `rust_build` conda 环境
@@ -25,14 +25,14 @@
 - Internet 连接 (首次运行时下载依赖)
 
 **输出**:
-- 编译后的二进制文件: `target/release/methrix`
+- 编译后的二进制文件: `target/release/methx`
 
 ---
 
 ### 测试脚本
 
 #### `test_real_data.sh`
-**用途**: 使用真实数据测试 methrix-cli
+**用途**: 使用真实数据测试 methx
 
 **功能**:
 - 下载参考基因组 (hg38)
@@ -79,7 +79,7 @@
 
 ### 1. 构建项目
 ```bash
-cd /path/to/methrix-cli
+cd /path/to/methx
 ./scripts/build.sh
 ```
 

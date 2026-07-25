@@ -110,7 +110,7 @@
 
 ### 整理前
 ```
-methrix-cli/
+methx/
 ├── *.md (15 个文档散落在根目录)
 ├── *.R (30+ 个脚本散落在根目录)
 └── CLAUDE.md, README.md
@@ -118,7 +118,7 @@ methrix-cli/
 
 ### 整理后
 ```
-methrix-cli/
+methx/
 ├── docs/                    # 所有文档
 │   ├── INDEX.md            # 📖 文档索引
 │   ├── *.md (20+ 个主题文档)

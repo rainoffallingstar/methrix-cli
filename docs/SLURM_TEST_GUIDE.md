@@ -1,6 +1,6 @@
-# Methrix CLI SLURM 测试指南
+# methx SLURM 测试指南
 
-本文档说明如何使用 SLURM 提交任务来测试 methrix-cli。
+本文档说明如何使用 SLURM 提交任务来测试 methx。
 
 ## 📋 测试脚本说明
 
@@ -22,7 +22,7 @@ sbatch run_test.sbatch
 **输出位置**:
 - HDF5: `testdata/mCall/rust_output/methrix_data.h5`
 - QC 报告: `testdata/mCall/rust_output/CpG_coverage.xlsx`
-- 日志: `logs/methrix_test_<JOB_ID>.out`
+- 日志: `logs/methx_test_<JOB_ID>.out`
 
 ### 2. 快速测试 (`run_quick_test.sbatch`)
 
@@ -41,7 +41,7 @@ sbatch run_quick_test.sbatch
 
 **输出位置**:
 - HDF5: `testdata/mCall/rust_output_quick/methrix_data.h5`
-- 日志: `logs/methrix_quick_<JOB_ID>.out`
+- 日志: `logs/methx_quick_<JOB_ID>.out`
 
 ## 🚀 使用步骤
 
@@ -51,7 +51,7 @@ sbatch run_quick_test.sbatch
 
 ```bash
 # 快速测试 (推荐首次运行)
-cd /public3/home/scg9946/methrix-cli
+cd /public3/home/scg9946/methx
 sbatch run_quick_test.sbatch
 
 # 完整测试
@@ -65,10 +65,10 @@ sbatch run_test.sbatch
 squeue -u $USER
 
 # 查看任务日志 (实时)
-tail -f logs/methrix_quick_<JOB_ID>.out
+tail -f logs/methx_quick_<JOB_ID>.out
 
 # 或查看完整日志
-cat logs/methrix_quick_<JOB_ID>.out
+cat logs/methx_quick_<JOB_ID>.out
 ```
 
 ### Step 3: 验证输出
@@ -76,7 +76,7 @@ cat logs/methrix_quick_<JOB_ID>.out
 任务完成后，运行 R 验证脚本：
 
 ```bash
-cd /public3/home/scg9946/methrix-cli
+cd /public3/home/scg9946/methx
 Rscript verify_r_compatibility.R
 ```
 
@@ -152,7 +152,7 @@ sacctmgr show qos
 **2. HDF5 文件未生成**
 ```bash
 # 查看错误日志
-cat logs/methrix_quick_<JOB_ID>.err
+cat logs/methx_quick_<JOB_ID>.err
 
 # 检查磁盘空间
 df -h

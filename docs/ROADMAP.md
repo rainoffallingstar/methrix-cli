@@ -1,4 +1,4 @@
-# Methrix CLI Development Roadmap
+# methx Development Roadmap
 
 ## Version 0.1.0 (Current Release)
 

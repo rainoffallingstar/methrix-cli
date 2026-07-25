@@ -1053,7 +1053,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "methrix-cli"
+name = "methx"
 version = "0.1.0"
 dependencies = [
  "anyhow",

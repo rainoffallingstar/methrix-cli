@@ -54,7 +54,7 @@ if ("beta" %in% dataset_names) {
   cat("✗ 使用旧命名 (v1.0)\n")
   cat("  - assay001: 存在\n")
   cat("  - assay002: ", ifelse("assay002" %in% dataset_names, "存在", "不存在"), "\n")
-  cat("建议: 更新到新版本的 methrix-cli\n")
+  cat("建议: 更新到新版本的 methx\n")
 } else {
   cat("✗ 未知的命名格式\n")
   cat("无法检测到 beta/cov 或 assay001/assay002\n")

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for methrix-cli with real data
+# Test script for methx with real data
 
 set -e
 
@@ -10,17 +10,17 @@ conda activate rust_build
 export HDF5_DIR=/public3/home/scg9946/TTest/soft/MyMiniconda/envs/rust_build
 
 # Paths
-TESTDATA_DIR="/public3/home/scg9946/methrix-cli/testdata/mCall"
-OUTPUT_DIR="/public3/home/scg9946/methrix-cli/testdata/mCall/rust_output"
-GENOME_DIR="/public3/home/scg9946/methrix-cli/testdata/genomes"
-BINARY="/public3/home/scg9946/methrix-cli/target/release/methrix"
+TESTDATA_DIR="/public3/home/scg9946/methx/testdata/mCall"
+OUTPUT_DIR="/public3/home/scg9946/methx/testdata/mCall/rust_output"
+GENOME_DIR="/public3/home/scg9946/methx/testdata/genomes"
+BINARY="/public3/home/scg9946/methx/target/release/methx"
 
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== Methrix CLI Real Data Test ===${NC}\n"
+echo -e "${YELLOW}=== methx Real Data Test ===${NC}\n"
 
 # Create directories
 mkdir -p "$OUTPUT_DIR"
@@ -50,7 +50,7 @@ echo -e "\n${YELLOW}Step 3: Processing Bismark files...${NC}"
 echo "Using 2 sample files for testing"
 
 # Create a temporary directory with just 2 files
-TEMP_INPUT="/tmp/methrix_test_input"
+TEMP_INPUT="/tmp/methx_test_input"
 rm -rf "$TEMP_INPUT"
 mkdir -p "$TEMP_INPUT"
 cp "$TESTDATA_DIR"/0108ZYHHPC70311_nsort.bismark.cov.gz "$TEMP_INPUT/"

@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
-use methrix_cli::{cli::process, genome::cpg, qc::report};
+use methx::{cli::process, genome::cpg, qc::report};
 use tracing::{info, Level};
 use tracing_subscriber::fmt;
 
 #[derive(Parser)]
-#[command(name = "methrix-cli")]
+#[command(name = "methx")]
 #[command(about = "High-performance methylation data processor", long_about = None)]
 #[command(version)]
-#[command(author = "methrix contributors")]
+#[command(author = "methx contributors")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -135,7 +135,7 @@ fn main() -> anyhow::Result<()> {
             skip_annotation,
             ..
         } => {
-            info!("Starting methrix processing pipeline");
+            info!("Starting methx processing pipeline");
             info!("Input: {}", input);
             info!("Output: {}", output);
             info!("Genome: {}", genome);
@@ -175,7 +175,7 @@ fn main() -> anyhow::Result<()> {
             info!("Downloading genome: {}", genome);
             #[cfg(feature = "download")]
             {
-                methrix_cli::genome::download::download_genome(&genome, &output_directory)?;
+                methx::genome::download::download_genome(&genome, &output_directory)?;
                 Ok(())
             }
             #[cfg(not(feature = "download"))]

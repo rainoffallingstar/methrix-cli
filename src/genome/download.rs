@@ -25,7 +25,7 @@ const MAX_DOWNLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 #[cfg(feature = "download")]
 const MAX_DECOMPRESSED_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 #[cfg(feature = "download")]
-const PROVENANCE_SCHEMA_NAME: &str = "methrix-cli.genome-download";
+const PROVENANCE_SCHEMA_NAME: &str = "methx.genome-download";
 #[cfg(feature = "download")]
 const PROVENANCE_SCHEMA_VERSION: &str = "1.0.0";
 

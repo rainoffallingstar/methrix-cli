@@ -18,7 +18,7 @@ pub struct CustomHdf5Summary {
     pub schema_version: String,
 }
 
-/// Validate the complete `methrix-cli.custom-hdf5/1.0.0` contract without
+/// Validate the complete `methx.custom-hdf5/1.0.0` contract without
 /// loading either assay into memory in full.
 pub fn validate_custom_hdf5(path: impl AsRef<Path>) -> Result<CustomHdf5Summary> {
     let path = path.as_ref();

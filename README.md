@@ -1,4 +1,4 @@
-# Methrix CLI
+# methx
 
 High-performance methylation data processor - Bismark to HDF5 conversion tool.
 
@@ -18,13 +18,13 @@ High-performance methylation data processor - Bismark to HDF5 conversion tool.
 
 ```bash
 # Clone the repository
-git clone https://github.com/CompEpigen/methrix.git
-cd methrix/methrix-cli
+git clone https://github.com/rainoffallingstar/methx.git
+cd methx
 
 # Build release version
 cargo build --release
 
-# The binary will be at: target/release/methrix
+# The binary will be at: target/release/methx
 ```
 
 ### Requirements
@@ -54,19 +54,19 @@ brew install hdf5
 
 ```bash
 # 1. Extract CpG sites from reference genome (optional one-time step)
-methrix extract-cpgs \
+methx extract-cpgs \
   --genome hg19.fa \
   --output hg19_cpgs.ron
 
 # 2. Process Bismark output files
-methrix process \
+methx process \
   --input bismark_output/ \
   --output results/ \
   --genome hg19_cpgs.ron \
   --threads 8
 
 # 3. Generate QC report (can be run separately)
-methrix qc-report \
+methx qc-report \
   --input results/ \
   --output qc_report.xlsx
 ```
@@ -77,19 +77,19 @@ The download command requires `--features download`. Built-in releases (`hg19`, 
 
 ```bash
 # Download built-in genome (hg19, hg38, mm10, mm39)
-methrix download-genome \
+methx download-genome \
   --genome hg19 \
   --output genomes/
 ```
 
 ### Commands
 
-#### `methrix process`
+#### `methx process`
 
 Process Bismark output files into methrix format.
 
 ```bash
-methrix process [OPTIONS]
+methx process [OPTIONS]
 
 Options:
   -i, --input <DIR>           Input directory with .bismark.cov.gz files
@@ -103,12 +103,12 @@ Options:
   -v, --verbose               Enable verbose logging
 ```
 
-#### `methrix extract-cpgs`
+#### `methx extract-cpgs`
 
 Extract CpG sites from reference genome.
 
 ```bash
-methrix extract-cpgs [OPTIONS]
+methx extract-cpgs [OPTIONS]
 
 Options:
   -g, --genome <GENOME>       Genome FASTA file or built-in name
@@ -117,12 +117,12 @@ Options:
   -v, --verbose               Enable verbose logging
 ```
 
-#### `methrix download-genome`
+#### `methx download-genome`
 
 Download reference genome from UCSC.
 
 ```bash
-methrix download-genome [OPTIONS]
+methx download-genome [OPTIONS]
 
 Options:
   -g, --genome <GENOME>       Genome name (hg19, hg38, mm10, mm39)
@@ -130,12 +130,12 @@ Options:
   -v, --verbose               Enable verbose logging
 ```
 
-#### `methrix qc-report`
+#### `methx qc-report`
 
 Regenerate a coverage-only QC report from an existing methrix H5 object.
 
 ```bash
-methrix qc-report [OPTIONS]
+methx qc-report [OPTIONS]
 
 Options:
   -i, --input <DIR>           Input directory with methrix H5 object
@@ -147,7 +147,7 @@ Options:
 
 ### HDF5 file structure
 
-The generated H5 file uses the versioned `methrix-cli.custom-hdf5` schema. It is designed for direct dataset access with R's `rhdf5`; it is **not** a standard `saveHDF5SummarizedExperiment()` directory and is not currently loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
+The generated H5 file uses the versioned `methx.custom-hdf5` schema. It is designed for direct dataset access with R's `rhdf5`; it is **not** a standard `saveHDF5SummarizedExperiment()` directory and is not currently loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
 
 `assays.h5` is the primary file. `methrix_data.h5` is an identical filename alias, not a different compatibility format:
 
@@ -168,7 +168,7 @@ methrix_data.h5
 └── metadata/
     ├── genome                # Reference genome name
     ├── is_h5                 # HDF5 format flag
-    ├── schema_name           # methrix-cli.custom-hdf5
+    ├── schema_name           # methx.custom-hdf5
     ├── schema_version        # Current schema version
     └── loader_compatibility  # Explicit supported/unsupported loader contract
 ```
@@ -182,7 +182,7 @@ Excel file with coverage statistics:
 
 ### CpG annotation report
 
-`methrix process` publishes the annotation outputs as one transaction with HDF5 and QC outputs:
+`methx process` publishes the annotation outputs as one transaction with HDF5 and QC outputs:
 
 - `CpG_annotation_report.xlsx`: bounded `ChIPseeker_By_Sample` summary data. The required qctb categories `Promoter`, `Exon`, `Intron`, and `Intergenic` are always present, including zero-count columns; additional categories follow in lexical order.
 - `CpG_annotation_details.tsv.gz`: unbounded per-CpG GTF annotation details with chromosome, 1-based closed coordinates, strand, annotation, gene, transcript, TSS distance, and exon/intron rank.

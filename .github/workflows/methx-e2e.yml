@@ -1,4 +1,4 @@
-name: methrix-cli-e2e
+name: methx-e2e
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   pull_request:
     paths:
       - "**"
-      - ".github/workflows/methrix-cli-e2e.yml"
+      - ".github/workflows/methx-e2e.yml"
 
 jobs:
   e2e:
@@ -35,22 +35,22 @@ jobs:
           test -f /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.so
           pkg-config --modversion hdf5 || pkg-config --modversion hdf5-serial
 
-      - name: Build methrix-cli with trusted download support
+      - name: Build methx with trusted download support
         run: |
           set -euo pipefail
           cargo build --release --features download
-          ./target/release/methrix --help | head -n 20
+          ./target/release/methx --help | head -n 20
 
-      - name: Download and verify hg19 with methrix-cli
+      - name: Download and verify hg19 with methx
         run: |
           set -euo pipefail
           mkdir -p testdata/hg19_genome
-          ./target/release/methrix download-genome \
+          ./target/release/methx download-genome \
             --genome hg19 \
             --output testdata/hg19_genome
           test -s testdata/hg19_genome/hg19.fa
           test -s testdata/hg19_genome/hg19.fa.provenance.ron
-          ./target/release/methrix download-genome \
+          ./target/release/methx download-genome \
             --genome hg19 \
             --output testdata/hg19_genome
           ls -lh testdata/hg19_genome/hg19.fa testdata/hg19_genome/hg19.fa.provenance.ron
@@ -68,7 +68,7 @@ jobs:
       - name: E2E test with GTF annotation
         run: |
           set -euo pipefail
-          ./target/release/methrix process \
+          ./target/release/methx process \
             --input testdata \
             --output testdata/output_e2e \
             --genome testdata/hg19_genome/hg19.fa \
@@ -119,7 +119,7 @@ jobs:
       - name: QC report compatibility check
         run: |
           set -euo pipefail
-          ./target/release/methrix qc-report \
+          ./target/release/methx qc-report \
             --input testdata/output_e2e \
             --output testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
           test -s testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
@@ -128,7 +128,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: methrix-qc-annotation-${{ github.run_id }}
+          name: methx-qc-annotation-${{ github.run_id }}
           path: |
             testdata/hg19_genome/hg19.fa.provenance.ron
             testdata/output_e2e/CpG_coverage.xlsx

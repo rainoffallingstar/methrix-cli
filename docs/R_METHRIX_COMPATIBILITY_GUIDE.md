@@ -1,8 +1,8 @@
-# Rust methrix-cli 与 R methrix 包完整兼容性实现
+# Rust methx 与 R methrix 包完整兼容性实现
 
 ## 🎯 实现目标
 
-实现 Rust methrix-cli 生成的数据与 R methrix 包的**完整兼容性**，支持所有核心分析功能。
+实现 Rust methx 生成的数据与 R methrix 包的**完整兼容性**，支持所有核心分析功能。
 
 ## ✅ 已实现功能
 
@@ -69,7 +69,7 @@ Rscript rust_to_methrix.R testdata/mCall/rust_output_20260222_112603_job36922017
 #### 1. Rust 处理 Bismark 数据
 
 ```bash
-methrix process \
+methx process \
   --input bismark_files/ \
   --output rust_output/ \
   --genome hg19 \
@@ -135,7 +135,7 @@ n_cpgs <- nrow(se)
 
 ## 🆚 与 R methrix 的对比
 
-| 特性 | Rust methrix-cli | R methrix |
+| 特性 | Rust methx | R methrix |
 |------|------------------|-----------|
 | **性能** | 21秒 | ~5-10分钟 |
 | **内存** | ~2 GB | ~4-8 GB |
@@ -281,11 +281,11 @@ m <- load_HDF5_methrix("output/")
 💡 **实际应用**：
 ```bash
 # Rust 处理（快速）
-methrix process -i input/ -o output/ -g hg19
+methx process -i input/ -o output/ -g hg19
 
 # R 分析（功能完整）
 Rscript rust_to_methrix.R output/
 # 现在可以使用所有 R/Bioconductor 甲基化分析工具
 ```
 
-Rust methrix-cli 成功实现了**高性能**与**R 生态系统兼容**的完美结合！
+Rust methx 成功实现了**高性能**与**R 生态系统兼容**的完美结合！

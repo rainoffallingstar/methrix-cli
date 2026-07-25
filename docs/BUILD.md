@@ -1,4 +1,4 @@
-# Methrix CLI Build Instructions
+# methx Build Instructions
 
 ## Building from Source
 
@@ -35,17 +35,17 @@
 
 ```bash
 # Clone the repository (if in methrix root)
-cd methrix-cli
+cd methx
 
 # Build release version (optimized)
 cargo build --release
 
 # The binary will be at:
-#   Linux/macOS: target/release/methrix
-#   Windows: target/release/methrix.exe
+#   Linux/macOS: target/release/methx
+#   Windows: target/release/methx.exe
 
 # Optional: Install to system path
-sudo cp target/release/methrix /usr/local/bin/
+sudo cp target/release/methx /usr/local/bin/
 ```
 
 ### Development Build
@@ -83,22 +83,22 @@ cross build --target x86_64-apple-darwin --release
 
 ```bash
 # Show help
-./target/release/methrix --help
+./target/release/methx --help
 
 # Process Bismark files
-./target/release/methrix process \
+./target/release/methx process \
   --input bismark_output/ \
   --output results/ \
   --genome hg19.fa \
   --threads 8
 
 # Extract CpGs
-./target/release/methrix extract-cpgs \
+./target/release/methx extract-cpgs \
   --genome hg19.fa \
   --output hg19_cpgs.ron
 
 # Generate QC report
-./target/release/methrix qc-report \
+./target/release/methx qc-report \
   --input results/ \
   --output qc.xlsx
 ```
@@ -132,19 +132,19 @@ RUN apt-get update && \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/methrix /usr/local/bin/
+COPY --from=builder /app/target/release/methx /usr/local/bin/
 
-ENTRYPOINT ["methrix"]
+ENTRYPOINT ["methx"]
 ```
 
 ### Build and run
 
 ```bash
 # Build
-docker build -t methrix-cli .
+docker build -t methx .
 
 # Run
-docker run -v $(pwd)/data:/data methrix-cli \
+docker run -v $(pwd)/data:/data methx \
   process --input /data/bismark --output /data/results --genome /data/hg19.fa
 ```
 
@@ -160,7 +160,7 @@ cargo install cargo-deb
 cargo deb --no-build
 
 # Install
-sudo dpkg -i target/debian/methrix*.deb
+sudo dpkg -i target/debian/methx*.deb
 ```
 
 ### RPM Package
@@ -173,7 +173,7 @@ cargo install cargo-generate-rpm
 cargo generate-rpm
 
 # Install
-sudo rpm -i target/generate-rpm/methrix*.rpm
+sudo rpm -i target/generate-rpm/methx*.rpm
 ```
 
 ## Verification
@@ -182,22 +182,22 @@ sudo rpm -i target/generate-rpm/methrix*.rpm
 
 ```bash
 # Check version
-methrix --version
+methx --version
 
 # Run help
-methrix --help
+methx --help
 
 # Test basic functionality
-methrix extract-cpgs --help
-methrix process --help
-methrix qc-report --help
+methx extract-cpgs --help
+methx process --help
+methx qc-report --help
 ```
 
 ### Test with sample data
 
 ```bash
 # (If sample data is available)
-methrix process \
+methx process \
   --input tests/data/bismark/ \
   --output /tmp/test_output/ \
   --genome tests/data/hg19.fa \
@@ -288,6 +288,6 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v3
         with:
-          name: methrix
-          path: target/release/methrix
+          name: methx
+          path: target/release/methx
 ```

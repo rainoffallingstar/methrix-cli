@@ -10,7 +10,7 @@
 ## 📁 仓库结构
 
 ```
-methrix-cli/
+methx/
 ├── .gitignore              # Git 忽略规则
 ├── .git/                   # Git 仓库数据
 ├── src/                    # Rust 源代码 (已跟踪)
@@ -221,10 +221,10 @@ git diff src/main.rs
 
 ```bash
 # GitHub
-git remote add origin https://github.com/username/methrix-cli.git
+git remote add origin https://github.com/username/methx.git
 
 # 或 SSH
-git remote add origin git@github.com:username/methrix-cli.git
+git remote add origin git@github.com:username/methx.git
 ```
 
 ### 首次推送
@@ -318,4 +318,4 @@ git shortlog -sn --all
 ---
 
 **最后更新**: 2026-02-22
-**维护者**: methrix-cli contributors
+**维护者**: methx contributors

@@ -1,12 +1,12 @@
 # HDF5 R兼容性验证报告
 
-> **历史报告，已被 2026-07-24 schema 契约取代。** 本文后续的 `assay001`/`assay002` 结构仅记录旧实现，不描述当前输出。当前产物使用 `methrix-cli.custom-hdf5/1.0.0` 的 `/beta`、`/cov`、`/rowData`、`/colData` 和 `/metadata`，仅承诺 `rhdf5` 直接访问；不承诺标准 HDF5Array 或 methrix loader 兼容。当前契约和验证命令见仓库 README。
+> **历史报告，已被 2026-07-24 schema 契约取代。** 本文后续的 `assay001`/`assay002` 结构仅记录旧实现，不描述当前输出。当前产物使用 `methx.custom-hdf5/1.0.0` 的 `/beta`、`/cov`、`/rowData`、`/colData` 和 `/metadata`，仅承诺 `rhdf5` 直接访问；不承诺标准 HDF5Array 或 methrix loader 兼容。当前契约和验证命令见仓库 README。
 
 ## 验证时间
 2026-02-22
 
 ## 测试环境
-- **Rust版本**: methrix-cli (release build)
+- **Rust版本**: methx (release build)
 - **R版本**: 4.4.3
 - **R包**: methrix, HDF5Array, rhdf5
 
@@ -26,7 +26,7 @@ assays.h5
 
 ### 与R methrix对比
 
-| 特性 | Rust methrix-cli | R methrix | 状态 |
+| 特性 | Rust methx | R methrix | 状态 |
 |------|------------------|-----------|------|
 | **文件名** | assays.h5 | assays.h5 | ✅ 匹配 |
 | **assay001维度** | 80028 x 2 | 28217448 x 12 | ⚠️ 测试数据差异 |
@@ -85,7 +85,7 @@ range(cov)                # [1] 0 1327
 
 ## 性能对比
 
-| 指标 | Rust methrix-cli | R methrix |
+| 指标 | Rust methx | R methrix |
 |------|------------------|-----------|
 | **处理时间** | 22秒 | ~5-10分钟 (估计) |
 | **内存使用** | ~2 GB | ~4-8 GB |
@@ -94,7 +94,7 @@ range(cov)                # [1] 0 1327
 ## 兼容性结论
 
 ### ✅ 完全兼容
-Rust methrix-cli 生成的 assays.h5 文件：
+Rust methx 生成的 assays.h5 文件：
 1. **文件结构** 与 R methrix 完全一致
 2. **数据格式** 可被 R/HDF5 正确读取
 3. **数据值** 范围合理，无异常
@@ -129,7 +129,7 @@ se <- SummarizedExperiment(
 
 ## 总结
 
-**Rust methrix-cli 成功实现了与 R methrix 的HDF5格式兼容性**
+**Rust methx 成功实现了与 R methrix 的HDF5格式兼容性**
 
 - ✅ assays.h5文件格式100%兼容
 - ✅ 数据可被R/HDF5正确读取

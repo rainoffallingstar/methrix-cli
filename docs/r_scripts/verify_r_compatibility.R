@@ -1,11 +1,11 @@
 #!/usr/bin/env Rscript
 
 #===========================================================
-# Methrix CLI R 兼容性验证脚本
+# methx R 兼容性验证脚本
 #===========================================================
 
 cat("==========================================\n")
-cat("Methrix CLI R 兼容性验证\n")
+cat("methx R 兼容性验证\n")
 cat("==========================================\n")
 cat("开始时间:", Sys.time(), "\n\n")
 
@@ -200,7 +200,7 @@ cat("==========================================\n")
 OUTPUT_FILE <- "testdata/mCall/rust_output/r_verification_results.txt"
 
 sink(OUTPUT_FILE)
-cat("Methrix CLI R 兼容性验证结果\n")
+cat("methx R 兼容性验证结果\n")
 cat("==========================================\n")
 cat("验证时间:", Sys.time(), "\n\n")
 cat("HDF5 文件:", H5_FILE, "\n\n")

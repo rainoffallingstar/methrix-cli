@@ -1,11 +1,11 @@
 [package]
-name = "methrix-cli"
+name = "methx"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance methylation data processor - Bismark to HDF5"
-authors = ["methrix contributors"]
+authors = ["methx contributors"]
 license = "MIT"
-repository = "https://github.com/rainoffallingstar/methrix-cli"
+repository = "https://github.com/rainoffallingstar/methx"
 
 # HDF5 linking:
 #   hdf5-dynamic (default for local dev): links system libhdf5
@@ -13,7 +13,7 @@ repository = "https://github.com/rainoffallingstar/methrix-cli"
 #   hdf5-pure    (future): pure-Rust HDF5, no C deps, not yet production-ready
 
 [[bin]]
-name = "methrix"
+name = "methx"
 path = "src/main.rs"
 
 [[test]]

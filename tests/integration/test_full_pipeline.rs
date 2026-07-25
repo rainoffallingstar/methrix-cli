@@ -1,4 +1,4 @@
-use methrix_cli::hdf5::validate_custom_hdf5;
+use methx::hdf5::validate_custom_hdf5;
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -21,7 +21,7 @@ fn process_command_runs_minimal_pipeline_from_fasta() {
     )
     .unwrap();
 
-    let command_output = Command::new(env!("CARGO_BIN_EXE_methrix"))
+    let command_output = Command::new(env!("CARGO_BIN_EXE_methx"))
         .arg("process")
         .arg("--input")
         .arg(&input_directory)
@@ -39,7 +39,7 @@ fn process_command_runs_minimal_pipeline_from_fasta() {
 
     assert!(
         command_output.status.success(),
-        "methrix process failed\nstdout:\n{}\nstderr:\n{}",
+        "methx process failed\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&command_output.stdout),
         String::from_utf8_lossy(&command_output.stderr)
     );

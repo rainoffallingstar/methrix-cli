@@ -1,11 +1,11 @@
-# Methrix CLI 测试快速参考
+# methx 测试快速参考
 
 ## 🚀 快速开始
 
 ### 方法 1: 使用提交助手 (推荐)
 
 ```bash
-cd /public3/home/scg9946/methrix-cli
+cd /public3/home/scg9946/methx
 ./submit_test.sh
 ```
 
@@ -29,17 +29,17 @@ squeue -u $USER
 squeue -j <JOB_ID>
 
 # 实时查看日志
-tail -f logs/methrix_quick_<JOB_ID>.out
+tail -f logs/methx_quick_<JOB_ID>.out
 
 # 查看完整日志
-cat logs/methrix_quick_<JOB_ID>.out
+cat logs/methx_quick_<JOB_ID>.out
 ```
 
 ## ✅ 验证结果
 
 ```bash
 # R 验证
-cd /public3/home/scg9946/methrix-cli
+cd /public3/home/scg9946/methx
 Rscript verify_r_compatibility.R
 ```
 
@@ -47,12 +47,12 @@ Rscript verify_r_compatibility.R
 
 | 文件 | 路径 |
 |------|------|
-| 二进制 | `target/release/methrix` |
+| 二进制 | `target/release/methx` |
 | 快速测试脚本 | `run_quick_test.sbatch` |
 | 完整测试脚本 | `run_test.sbatch` |
 | 提交助手 | `submit_test.sh` |
 | R 验证脚本 | `verify_r_compatibility.R` |
-| 测试日志 | `logs/methrix_*_<JOB_ID>.out` |
+| 测试日志 | `logs/methx_*_<JOB_ID>.out` |
 | 快速测试输出 | `testdata/mCall/rust_output_quick/` |
 | 完整测试输出 | `testdata/mCall/rust_output/` |
 

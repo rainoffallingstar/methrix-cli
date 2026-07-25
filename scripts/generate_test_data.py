@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate test data for methrix-cli development and testing.
+Generate test data for methx development and testing.
 
 This script creates synthetic Bismark output files and reference genome data
-for testing the methrix-cli tool.
+for testing the methx tool.
 """
 
 import gzip
@@ -94,9 +94,9 @@ def generate_test_suite(output_dir: str):
         )
 
     # 3. Create README
-    readme_content = """# Methrix CLI Test Data
+    readme_content = """# methx Test Data
 
-This directory contains synthetic test data for methrix-cli development and testing.
+This directory contains synthetic test data for methx development and testing.
 
 ## Structure
 
@@ -117,7 +117,7 @@ test_data/
 ### Process test data
 
 ```bash
-methrix process \
+methx process \
   --input bismark/ \
   --output results/ \
   --genome genome/test_hg19.fa \
@@ -142,9 +142,9 @@ python3 ../scripts/generate_test_data.py
 
     print(f"\n✅ Test suite generated successfully!")
     print(f"\nNext steps:")
-    print(f"  1. Build methrix-cli: cargo build --release")
+    print(f"  1. Build methx: cargo build --release")
     print(f"  2. Run test:")
-    print(f"     ./target/release/methrix process \\")
+    print(f"     ./target/release/methx process \\")
     print(f"       --input {output_dir}/bismark \\")
     print(f"       --output {output_dir}/results \\")
     print(f"       --genome {output_dir}/genome/test_hg19.fa")
@@ -156,6 +156,6 @@ if __name__ == "__main__":
     output_dir = sys.argv[1] if len(sys.argv) > 1 else "tests/data"
 
     if output_dir == "tests/data":
-        output_dir = "methrix-cli/tests/data"
+        output_dir = "methx/tests/data"
 
     generate_test_suite(output_dir)

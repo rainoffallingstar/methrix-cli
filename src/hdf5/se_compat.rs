@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use crate::atomic_output::write_atomically;
 
-pub const SCHEMA_NAME: &str = "methrix-cli.custom-hdf5";
+pub const SCHEMA_NAME: &str = "methx.custom-hdf5";
 pub const SCHEMA_VERSION: &str = "1.0.0";
 pub const LOADER_COMPATIBILITY: &str = "rhdf5 direct schema access only; not compatible with HDF5Array::loadHDF5SummarizedExperiment or methrix::load_HDF5_methrix";
 const TARGET_ASSAY_CHUNK_BYTES: usize = 1024 * 1024;
@@ -23,7 +23,7 @@ impl CustomHdf5Writer {
         }
     }
 
-    /// Write the versioned methrix-cli custom HDF5 schema atomically.
+    /// Write the versioned methx custom HDF5 schema atomically.
     pub fn write_methrix_object(
         &self,
         methrix_data: &crate::cli::process::MethrixData,

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build script for methrix-cli using conda environment
+# Build script for methx using conda environment
 
 set -e
 
@@ -9,7 +9,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}=== Methrix CLI Build Script ===${NC}\n"
+echo -e "${YELLOW}=== methx Build Script ===${NC}\n"
 
 # Check if conda is available
 if ! command -v conda &> /dev/null; then
@@ -47,16 +47,16 @@ fi
 echo -e "${GREEN}HDF5 found in: $HDF5_DIR${NC}\n"
 
 # Build the project
-echo -e "${YELLOW}Building methrix-cli...${NC}\n"
+echo -e "${YELLOW}Building methx...${NC}\n"
 cargo build --release
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
     echo -e "\n${GREEN}=== Build successful! ===${NC}"
-    echo "Binary: target/release/methrix"
+    echo "Binary: target/release/methx"
     echo ""
-    echo "To use methrix-cli, run:"
-    echo "  ./target/release/methrix --help"
+    echo "To use methx, run:"
+    echo "  ./target/release/methx --help"
 else
     echo -e "\n${RED}=== Build failed! ===${NC}"
     exit 1

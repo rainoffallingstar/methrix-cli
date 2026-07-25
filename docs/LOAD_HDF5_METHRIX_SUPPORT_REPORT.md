@@ -1,12 +1,12 @@
 # load_HDF5_methrix() 完整支持实现报告
 
-> **历史报告，当前不再适用。** 当前 `methrix-cli.custom-hdf5/1.0.0` 不生成 `se.rds`，并明确不支持 `HDF5Array::loadHDF5SummarizedExperiment()` 或 `methrix::load_HDF5_methrix()` 直接加载。受支持的 R 互操作路径是 `rhdf5` 直接读取版本化 datasets；任何标准 loader 兼容工作都必须采用新 schema 版本并加入真实 loader smoke test。
+> **历史报告，当前不再适用。** 当前 `methx.custom-hdf5/1.0.0` 不生成 `se.rds`，并明确不支持 `HDF5Array::loadHDF5SummarizedExperiment()` 或 `methrix::load_HDF5_methrix()` 直接加载。受支持的 R 互操作路径是 `rhdf5` 直接读取版本化 datasets；任何标准 loader 兼容工作都必须采用新 schema 版本并加入真实 loader smoke test。
 
 ## 实现时间
 2026-02-22
 
 ## 目标
-实现Rust methrix-cli生成的数据与R methrix包的`load_HDF5_methrix()`函数完全兼容。
+实现Rust methx生成的数据与R methrix包的`load_HDF5_methrix()`函数完全兼容。
 
 ## 实现状态
 
@@ -122,7 +122,7 @@ output_dir/
 
 ## 性能对比
 
-| 项目 | Rust methrix-cli | R methrix |
+| 项目 | Rust methx | R methrix |
 |------|------------------|-----------|
 | 处理时间 | 21秒 | ~5-10分钟 |
 | 内存使用 | ~2 GB | ~4-8 GB |
@@ -144,7 +144,7 @@ output_dir/
 💡 **推荐工作流**:
 ```bash
 # Rust处理
-methrix process -i input/ -o output/ -g hg19
+methx process -i input/ -o output/ -g hg19
 
 # 在R中使用
 library(methrix)
@@ -169,7 +169,7 @@ se <- readRDS("output/se.rds")
 
 ## 结论
 
-Rust methrix-cli成功实现了与R methrix包的数据级兼容性。生成的assays.h5和se.rds文件可以被R正确读取和使用，实现了**跨语言互操作**的目标。
+Rust methx成功实现了与R methrix包的数据级兼容性。生成的assays.h5和se.rds文件可以被R正确读取和使用，实现了**跨语言互操作**的目标。
 
 虽然`load_HDF5_methrix()`函数不完全兼容，但用户可以通过读取se.rds文件获得相同的功能，这是一个合理的权衡，因为：
 1. se.rds文件完全兼容

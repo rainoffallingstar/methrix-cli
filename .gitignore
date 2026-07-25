@@ -158,7 +158,7 @@ debug.info
 *.profraw
 *.profdata
 
-# Additional ignores specific to methrix-cli
+# Additional ignores specific to methx
 # Genome FASTA data under testdata (still ignored; downloaded in CI)
 testdata/**/*.fa
 testdata/**/*.fasta

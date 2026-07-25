@@ -1,6 +1,6 @@
-# Methrix CLI 文档索引
+# methx 文档索引
 
-本目录包含 Methrix CLI 项目的完整文档。
+本目录包含 methx 项目的完整文档。
 
 ## 📚 文档列表
 
@@ -86,7 +86,7 @@
 
 ### 我想...
 
-#### ...开始使用 Methrix CLI
+#### ...开始使用 methx
 → 阅读 [QUICKSTART.md](QUICKSTART.md)
 
 #### ...了解 HDF5 文件结构
@@ -195,10 +195,10 @@ docs/
 
 ### 项目资源
 
-- **Rust methrix-cli**: https://github.com/CompEpigen/methrix
+- **Rust methx**: https://github.com/rainoffallingstar/methx
 - **R methrix 包**: https://bioconductor.org/packages/release/bioc/html/methrix/
-- **Issue 跟踪**: https://github.com/CompEpigen/methrix/issues
-- **Discussions**: https://github.com/CompEpigen/methrix/discussions
+- **Issue 跟踪**: https://github.com/rainoffallingstar/methx/issues
+- **Discussions**: https://github.com/rainoffallingstar/methx/discussions
 
 ### 外部资源
 

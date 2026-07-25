@@ -1,6 +1,6 @@
 #!/bin/bash
 #===========================================================
-# Methrix CLI 测试任务提交助手
+# methx 测试任务提交助手
 #===========================================================
 
 set -e
@@ -12,11 +12,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}=============================================="
-echo "   Methrix CLI 测试任务提交助手"
+echo "   methx 测试任务提交助手"
 echo -e "==============================================${NC}\n"
 
 # 检查是否在正确的目录
-if [ ! -f "target/release/methrix" ]; then
+if [ ! -f "target/release/methx" ]; then
     echo -e "${YELLOW}警告: 未找到编译的二进制文件${NC}"
     echo "请先运行: cargo build --release"
     echo ""
@@ -115,7 +115,7 @@ echo "查看状态:"
 echo "  squeue -j $JOB_ID"
 echo ""
 echo "查看日志:"
-echo "  tail -f logs/methrix_*_${JOB_ID}.out"
+echo "  tail -f logs/methx_*_${JOB_ID}.out"
 echo ""
 
 # 等待几秒后检查任务状态
@@ -130,7 +130,7 @@ else
     echo -e "${YELLOW}任务已完成或已退出${NC}"
     echo ""
     echo "查看日志:"
-    echo "  cat logs/methrix_*_${JOB_ID}.out"
+    echo "  cat logs/methx_*_${JOB_ID}.out"
 fi
 
 echo ""

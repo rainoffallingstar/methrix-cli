@@ -1,9 +1,9 @@
-# Methrix CLI 项目结构
+# methx 项目结构
 
 ## 📁 目录组织
 
 ```
-methrix-cli/
+methx/
 ├── src/                      # Rust 源代码
 │   ├── main.rs              # 程序入口
 │   ├── lib.rs               # 库导出
@@ -83,7 +83,7 @@ methrix-cli/
 
 ### 我想要...
 
-#### ...开始使用 Methrix CLI
+#### ...开始使用 methx
 → 阅读 [README.md](README.md)
 → 查看 [docs/QUICKSTART.md](docs/QUICKSTART.md)
 
@@ -172,8 +172,8 @@ cargo test
 
 ### 运行
 ```bash
-./target/release/methrix --help
-./target/release/methrix process -i <input> -o <output> -g <genome>
+./target/release/methx --help
+./target/release/methx process -i <input> -o <output> -g <genome>
 ```
 
 ### 集群测试

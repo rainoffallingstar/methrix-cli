@@ -1,6 +1,6 @@
 #!/bin/bash
 #===========================================================
-# 监控 Methrix CLI 测试任务
+# 监控 methx 测试任务
 #===========================================================
 
 JOB_ID=$1
@@ -35,10 +35,10 @@ while squeue -j $JOB_ID &> /dev/null; do
 
     # 显示最后20行输出
     echo "=== 输出日志 (最后20行) ==="
-    if [ -f "logs/methrix_quick_${JOB_ID}.out" ]; then
-        tail -20 "logs/methrix_quick_${JOB_ID}.out"
-    elif [ -f "logs/methrix_test_${JOB_ID}.out" ]; then
-        tail -20 "logs/methrix_test_${JOB_ID}.out"
+    if [ -f "logs/methx_quick_${JOB_ID}.out" ]; then
+        tail -20 "logs/methx_quick_${JOB_ID}.out"
+    elif [ -f "logs/methx_test_${JOB_ID}.out" ]; then
+        tail -20 "logs/methx_test_${JOB_ID}.out"
     else
         echo "日志文件尚未创建"
     fi
@@ -63,19 +63,19 @@ echo ""
 
 # 显示完整输出
 echo "=== 完整输出日志 ==="
-if [ -f "logs/methrix_quick_${JOB_ID}.out" ]; then
-    cat "logs/methrix_quick_${JOB_ID}.out"
-elif [ -f "logs/methrix_test_${JOB_ID}.out" ]; then
-    cat "logs/methrix_test_${JOB_ID}.out"
+if [ -f "logs/methx_quick_${JOB_ID}.out" ]; then
+    cat "logs/methx_quick_${JOB_ID}.out"
+elif [ -f "logs/methx_test_${JOB_ID}.out" ]; then
+    cat "logs/methx_test_${JOB_ID}.out"
 fi
 
 # 显示错误（如果有）
 echo ""
 echo "=== 错误日志 ==="
-if [ -f "logs/methrix_quick_${JOB_ID}.err" ]; then
-    cat "logs/methrix_quick_${JOB_ID}.err"
-elif [ -f "logs/methrix_test_${JOB_ID}.err" ]; then
-    cat "logs/methrix_test_${JOB_ID}.err"
+if [ -f "logs/methx_quick_${JOB_ID}.err" ]; then
+    cat "logs/methx_quick_${JOB_ID}.err"
+elif [ -f "logs/methx_test_${JOB_ID}.err" ]; then
+    cat "logs/methx_test_${JOB_ID}.err"
 fi
 
 echo ""

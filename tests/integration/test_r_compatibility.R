@@ -97,7 +97,7 @@ assert_true(all(widths == end_positions - start_positions + 1L), "rowData/width 
 assert_true(all(strands %in% c("+", "-", "*")), "rowData/strand contains unsupported values")
 assert_true(length(genome) == 1L && nzchar(genome), "metadata/genome must be a non-empty scalar")
 assert_true(length(is_h5) == 1L && isTRUE(is_h5), "metadata/is_h5 must be TRUE")
-assert_true(identical(schema_name, "methrix-cli.custom-hdf5"), "Unexpected custom schema name")
+assert_true(identical(schema_name, "methx.custom-hdf5"), "Unexpected custom schema name")
 assert_true(identical(schema_version, "1.0.0"), "Unexpected custom schema version")
 assert_true(
   grepl("rhdf5 direct schema access only", loader_compatibility, fixed = TRUE),

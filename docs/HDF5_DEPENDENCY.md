@@ -18,7 +18,7 @@ hdf5 = "0.8"
 ### 实际的依赖树
 
 ```
-methrix-cli
+methx
 └── hdf5 v0.8.1
     ├── hdf5-sys v0.8.1      # FFI 绑定到 C HDF5 库
     │   ├── libc            # C 库接口

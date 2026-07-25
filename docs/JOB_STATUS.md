@@ -1,9 +1,9 @@
-# Methrix CLI SLURM 测试任务状态
+# methx SLURM 测试任务状态
 
 ## 📊 当前任务信息
 
 **任务ID**: 36921904
-**任务名称**: methrix-quick
+**任务名称**: methx-quick
 **提交时间**: 2025-02-22 09:29:56
 **分区**: amd_512
 **状态**: 🔄 正在运行 (R)
@@ -23,8 +23,8 @@
 **输出目录**: `testdata/mCall/rust_output_20260222_092958_job36921904/`
 
 **日志文件**:
-- 标准输出: `logs/methrix_quick_36921904.out`
-- 标准错误: `logs/methrix_quick_36921904.err`
+- 标准输出: `logs/methx_quick_36921904.out`
+- 标准错误: `logs/methx_quick_36921904.err`
 
 ## 📈 当前进度
 
@@ -55,7 +55,7 @@
 squeue -j 36921904
 
 # 实时查看日志
-tail -f logs/methrix_quick_36921904.out
+tail -f logs/methx_quick_36921904.out
 
 # 使用监控脚本
 ./monitor_job.sh 36921904
@@ -64,10 +64,10 @@ tail -f logs/methrix_quick_36921904.out
 ### 查看输出
 ```bash
 # 查看最近100行
-tail -100 logs/methrix_quick_36921904.out
+tail -100 logs/methx_quick_36921904.out
 
 # 查看完整日志
-cat logs/methrix_quick_36921904.out
+cat logs/methx_quick_36921904.out
 ```
 
 ## 📊 预期输出
@@ -125,7 +125,7 @@ cat logs/methrix_quick_36921904.out
 如遇问题：
 ```bash
 # 查看错误日志
-cat logs/methrix_quick_36921904.err
+cat logs/methx_quick_36921904.err
 
 # 取消任务
 scancel 36921904

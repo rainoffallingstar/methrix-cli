@@ -1,15 +1,15 @@
-# Methrix CLI 设计文档
+# methx 设计文档
 
 ## 项目概述
 
-Methrix CLI 是一个 Rust 原生的甲基化数据处理命令行工具，用于将 Bismark coverage 数据转换为版本化的 `methrix-cli.custom-hdf5` 格式，并生成 QC 与 CpG annotation 报告。
+methx 是一个 Rust 原生的甲基化数据处理命令行工具，用于将 Bismark coverage 数据转换为版本化的 `methx.custom-hdf5` 格式，并生成 QC 与 CpG annotation 报告。
 
 当前 HDF5 契约支持 R `rhdf5` 直接读取。它不是标准 `saveHDF5SummarizedExperiment()` 目录，不生成 `se.rds`，也不声明可由 `HDF5Array::loadHDF5SummarizedExperiment()` 或 `methrix::load_HDF5_methrix()` 直接加载。
 
 ## 设计目标
 
 1. 主处理流程不依赖 R 或 Bioconductor。
-2. 冻结并验证 `methrix-cli.custom-hdf5/1.0.0` schema。
+2. 冻结并验证 `methx.custom-hdf5/1.0.0` schema。
 3. 使用明确、可检查的坐标与 beta/coverage 缺失值契约。
 4. 控制 HDF5 写入和样本处理的临时内存峰值。
 5. 将 HDF5、QC 和 annotation 作为可回滚事务发布。
@@ -92,7 +92,7 @@ Transactional publication
 固定 metadata：
 
 ```text
-schema_name = methrix-cli.custom-hdf5
+schema_name = methx.custom-hdf5
 schema_version = 1.0.0
 loader_compatibility = rhdf5 direct schema access only; standard HDF5Array/methrix loaders unsupported
 ```
@@ -121,7 +121,7 @@ loader_compatibility = rhdf5 direct schema access only; standard HDF5Array/methr
 
 ## Annotation 契约
 
-`methrix process` 默认发布两个 annotation 产物：
+`methx process` 默认发布两个 annotation 产物：
 
 - `CpG_annotation_report.xlsx`：仅包含 `ChIPseeker_By_Sample` 汇总。
 - `CpG_annotation_details.tsv.gz`：逐 CpG GTF annotation 明细。
@@ -183,7 +183,7 @@ cargo build --all-targets --all-features --locked
 - transaction staging/publish rollback 与 stale removal。
 - annotation 固定列和 gzip TSV readback。
 - genome manifest、download size limit 和 cache tamper detection。
-- 通过真实 `methrix process` 二进制运行的最小 FASTA/Bismark integration test。
+- 通过真实 `methx process` 二进制运行的最小 FASTA/Bismark integration test。
 - CI 中的 R `rhdf5` direct-schema smoke test。
 
 ## 已知限制
