@@ -1,8 +1,13 @@
 use anyhow::{Context, Result};
 use needletail::parse_fastx_file;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::Path,
+};
+
+use crate::atomic_output::write_atomically;
 
 trait SeparatedString {
     fn separated_string(&self) -> String;
@@ -86,9 +91,16 @@ impl CpGExtractor {
             }
 
             // Record contig info
+            let contig_length = u32::try_from(seq.len()).with_context(|| {
+                format!(
+                    "FASTA contig {} has {} bases, exceeding the u32 coordinate limit",
+                    chr,
+                    seq.len()
+                )
+            })?;
             contig_info.push(ContigInfo {
                 contig: chr.clone(),
-                length: seq.len() as u32,
+                length: contig_length,
             });
 
             // Extract CpG sites - equivalent to Biostrings::matchPattern("CG", sequence)
@@ -120,11 +132,14 @@ impl CpGExtractor {
     }
 
     fn is_standard_chromosome(&self, chr: &str) -> bool {
-        // Handle with/without chr prefix
-        let chr_clean = chr.strip_prefix("chr").unwrap_or(chr);
+        let chr_clean = chr
+            .get(..3)
+            .filter(|prefix| prefix.eq_ignore_ascii_case("chr"))
+            .map_or(chr, |_| &chr[3..])
+            .to_ascii_uppercase();
 
         matches!(
-            chr_clean,
+            chr_clean.as_str(),
             "1" | "2"
                 | "3"
                 | "4"
@@ -148,6 +163,8 @@ impl CpGExtractor {
                 | "22"
                 | "X"
                 | "Y"
+                | "M"
+                | "MT"
         )
     }
 
@@ -211,8 +228,12 @@ impl CpGExtractor {
         let ron_string = ron::ser::to_string_pretty(&cpg_data, Default::default())
             .context("Failed to serialize CpG data")?;
 
-        let mut file = BufWriter::new(File::create(output_path)?);
-        file.write_all(ron_string.as_bytes())?;
+        write_atomically(Path::new(output_path), |staging_path| {
+            let mut writer = BufWriter::new(File::create(staging_path)?);
+            writer.write_all(ron_string.as_bytes())?;
+            writer.flush()?;
+            Ok(())
+        })?;
 
         println!("CpG data saved to: {}", output_path);
         Ok(())
@@ -250,9 +271,11 @@ mod tests {
         let extractor = CpGExtractor::new("test.fa".to_string());
 
         assert!(extractor.is_standard_chromosome("chr1"));
+        assert!(extractor.is_standard_chromosome("Chr1"));
         assert!(extractor.is_standard_chromosome("chrX"));
         assert!(extractor.is_standard_chromosome("chrY"));
-        assert!(!extractor.is_standard_chromosome("chrM"));
+        assert!(extractor.is_standard_chromosome("chrM"));
+        assert!(extractor.is_standard_chromosome("MT"));
         assert!(!extractor.is_standard_chromosome("chrUn"));
     }
 

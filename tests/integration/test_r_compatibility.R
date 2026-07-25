@@ -51,9 +51,6 @@ normalize_assay <- function(values, cpg_count, sample_count, assay_name) {
   )
 }
 
-root_attributes <- rhdf5::h5readAttributes(h5_path, "/")
-assert_true(identical(as.integer(root_attributes$se_version), 2L), "Root attribute se_version must equal 2")
-
 file_structure <- rhdf5::h5ls(h5_path, recursive = TRUE)
 all_paths <- gsub("^/+", "", paste(file_structure$group, file_structure$name, sep = "/"))
 required_paths <- c(
@@ -66,7 +63,10 @@ required_paths <- c(
   "rowData/strand",
   "colData/sample_name",
   "metadata/genome",
-  "metadata/is_h5"
+  "metadata/is_h5",
+  "metadata/schema_name",
+  "metadata/schema_version",
+  "metadata/loader_compatibility"
 )
 missing_paths <- setdiff(required_paths, all_paths)
 assert_true(length(missing_paths) == 0L, sprintf("Missing HDF5 paths: %s", paste(missing_paths, collapse = ", ")))
@@ -79,6 +79,9 @@ strands <- as.character(read_required_dataset("/rowData/strand"))
 sample_names <- enc2utf8(as.character(read_required_dataset("/colData/sample_name")))
 genome <- enc2utf8(as.character(read_required_dataset("/metadata/genome")))
 is_h5 <- as.logical(read_required_dataset("/metadata/is_h5"))
+schema_name <- enc2utf8(as.character(read_required_dataset("/metadata/schema_name")))
+schema_version <- enc2utf8(as.character(read_required_dataset("/metadata/schema_version")))
+loader_compatibility <- enc2utf8(as.character(read_required_dataset("/metadata/loader_compatibility")))
 
 cpg_count <- length(sequence_names)
 sample_count <- length(sample_names)
@@ -94,6 +97,16 @@ assert_true(all(widths == end_positions - start_positions + 1L), "rowData/width 
 assert_true(all(strands %in% c("+", "-", "*")), "rowData/strand contains unsupported values")
 assert_true(length(genome) == 1L && nzchar(genome), "metadata/genome must be a non-empty scalar")
 assert_true(length(is_h5) == 1L && isTRUE(is_h5), "metadata/is_h5 must be TRUE")
+assert_true(identical(schema_name, "methrix-cli.custom-hdf5"), "Unexpected custom schema name")
+assert_true(identical(schema_version, "1.0.0"), "Unexpected custom schema version")
+assert_true(
+  grepl("rhdf5 direct schema access only", loader_compatibility, fixed = TRUE),
+  "loader compatibility must identify rhdf5 direct schema access"
+)
+assert_true(
+  grepl("not compatible with HDF5Array::loadHDF5SummarizedExperiment", loader_compatibility, fixed = TRUE),
+  "loader compatibility must not claim standard HDF5Array loader support"
+)
 
 beta <- normalize_assay(read_required_dataset("/beta"), cpg_count, sample_count, "beta")
 coverage <- normalize_assay(read_required_dataset("/cov"), cpg_count, sample_count, "cov")
@@ -101,33 +114,4 @@ assert_true(all(is.na(beta) | (is.finite(beta) & beta >= 0 & beta <= 1)), "beta 
 assert_true(all(is.finite(coverage) & coverage >= 0), "cov contains negative or non-finite values")
 assert_true(all(coverage == floor(coverage)), "cov contains non-integral values")
 
-if (
-  requireNamespace("SummarizedExperiment", quietly = TRUE) &&
-  requireNamespace("GenomicRanges", quietly = TRUE) &&
-  requireNamespace("IRanges", quietly = TRUE) &&
-  requireNamespace("S4Vectors", quietly = TRUE)
-) {
-  row_ranges <- GenomicRanges::GRanges(
-    seqnames = sequence_names,
-    ranges = IRanges::IRanges(start = start_positions, end = end_positions),
-    strand = strands
-  )
-  column_data <- S4Vectors::DataFrame(sample_name = sample_names)
-  summarized_experiment <- SummarizedExperiment::SummarizedExperiment(
-    assays = list(beta = beta, cov = coverage),
-    rowRanges = row_ranges,
-    colData = column_data,
-    metadata = list(genome = genome, is_h5 = is_h5)
-  )
-
-  assert_true(
-    identical(as.integer(dim(summarized_experiment)), c(cpg_count, sample_count)),
-    "SummarizedExperiment dimensions do not match the HDF5 contract"
-  )
-  assert_true(
-    identical(SummarizedExperiment::assayNames(summarized_experiment), c("beta", "cov")),
-    "SummarizedExperiment assay names are incorrect"
-  )
-}
-
-cat(sprintf("PASS: validated %d CpGs and %d samples in %s\n", cpg_count, sample_count, h5_path))
+cat(sprintf("PASS: validated rhdf5 direct custom schema with %d CpGs and %d samples in %s\n", cpg_count, sample_count, h5_path))

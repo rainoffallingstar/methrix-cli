@@ -148,9 +148,9 @@ impl BismarkReader {
                 line_number
             );
         }
-        if end_1based < start_1based {
+        if end_1based != start_1based {
             bail!(
-                "Invalid Bismark coverage record in {} at line {}: end {} is before start {}",
+                "Invalid Bismark coverage record in {} at line {}: CpG end {} must equal start {}",
                 self.file_path,
                 line_number,
                 end_1based,
@@ -289,6 +289,16 @@ mod tests {
 
         assert!(error.to_string().contains("line 7"));
         assert!(error.to_string().contains("does not match counts"));
+    }
+
+    #[test]
+    fn rejects_multi_base_bismark_ranges() {
+        let reader = BismarkReader::new("test.cov".to_string());
+        let error = reader
+            .parse_line("chr1\t10\t11\t50.0\t1\t1", 3)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("end 11 must equal start 10"));
     }
 
     #[test]

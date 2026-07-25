@@ -4,9 +4,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use crate::atomic_output::AtomicOutputSet;
 use crate::bismark::BismarkReader;
 use crate::genome::cpg::{CpGData, CpGSite};
-use crate::hdf5::se_compat::SummarizedExperimentWriter;
+use crate::hdf5::{validate_custom_hdf5, CustomHdf5Writer};
 use crate::processing::{filter, stats};
 
 pub struct MethrixProcessor {
@@ -58,40 +59,31 @@ impl MethrixProcessor {
 
         let n_cpgs = self.cpg_data.cpgs.len();
         let n_samples = files.len();
-        let mut beta_matrix = ndarray::Array2::<f32>::from_elem((n_cpgs, n_samples), f32::NAN);
-        let mut cov_matrix = ndarray::Array2::<u32>::zeros((n_cpgs, n_samples));
+        let (beta_matrix, cov_matrix, covered_indices) = pool.install(|| {
+            let mut beta_matrix = ndarray::Array2::<f32>::from_elem((n_cpgs, n_samples), f32::NAN);
+            let mut cov_matrix = ndarray::Array2::<u32>::zeros((n_cpgs, n_samples));
 
-        let results: Vec<(usize, ProcessedSample)> = pool
-            .install(|| {
-                files
-                    .par_iter()
-                    .enumerate()
-                    .map(|(sample_index, file_path)| {
-                        let sample = self
-                            .process_single_file(file_path, min_coverage)
-                            .with_context(|| format!("Failed to process {}", file_path))?;
-                        Ok::<(usize, ProcessedSample), anyhow::Error>((sample_index, sample))
-                    })
-                    .collect::<Vec<Result<(usize, ProcessedSample)>>>()
-            })
-            .into_iter()
-            .collect::<Result<Vec<(usize, ProcessedSample)>>>()?;
-
-        for (sample_index, sample) in results {
             beta_matrix
-                .column_mut(sample_index)
-                .assign(&ndarray::Array1::from(sample.beta_values));
-            cov_matrix
-                .column_mut(sample_index)
-                .assign(&ndarray::Array1::from(sample.coverage_values));
-        }
+                .axis_iter_mut(ndarray::Axis(1))
+                .into_par_iter()
+                .zip(cov_matrix.axis_iter_mut(ndarray::Axis(1)).into_par_iter())
+                .zip(files.par_iter())
+                .try_for_each(|((mut beta_column, mut coverage_column), file_path)| {
+                    let sample = self
+                        .process_single_file(file_path, min_coverage)
+                        .with_context(|| format!("Failed to process {}", file_path))?;
+                    beta_column.assign(&ndarray::ArrayView1::from(&sample.beta_values));
+                    coverage_column.assign(&ndarray::ArrayView1::from(&sample.coverage_values));
+                    Ok::<(), anyhow::Error>(())
+                })?;
 
-        let (beta_matrix, cov_matrix, covered_indices) = if remove_uncovered {
-            filter::remove_uncovered(beta_matrix, cov_matrix)?
-        } else {
-            let indices = (0..self.cpg_data.cpgs.len()).collect();
-            (beta_matrix, cov_matrix, indices)
-        };
+            if remove_uncovered {
+                filter::remove_uncovered(beta_matrix, cov_matrix)
+            } else {
+                let indices = (0..self.cpg_data.cpgs.len()).collect();
+                Ok((beta_matrix, cov_matrix, indices))
+            }
+        })?;
 
         let cpg_locations = covered_indices
             .iter()
@@ -294,42 +286,66 @@ pub fn run_pipeline(config: PipelineConfig) -> Result<()> {
     let methrix_data =
         processor.process_files_parallel(bismark_files, threads, min_coverage, remove_uncovered)?;
 
-    let assays_h5_path = Path::new(&output_dir).join("assays.h5");
-    let compat_h5_path = Path::new(&output_dir).join("methrix_data.h5");
-    println!("Writing HDF5 file to: {}", assays_h5_path.display());
+    let output_directory = Path::new(&output_dir);
+    let assays_h5_path = output_directory.join("assays.h5");
+    let alias_h5_path = output_directory.join("methrix_data.h5");
+    let qc_path = output_directory.join("CpG_coverage.xlsx");
+    let annotation_path = output_directory.join("CpG_annotation_report.xlsx");
+    let annotation_details_path = output_directory.join("CpG_annotation_details.tsv.gz");
 
-    SummarizedExperimentWriter::new(assays_h5_path.to_string_lossy().to_string())
-        .write_methrix_object(&methrix_data)?;
-    fs::copy(&assays_h5_path, &compat_h5_path).with_context(|| {
-        format!(
-            "Failed to create compatibility HDF5 copy: {}",
-            compat_h5_path.display()
-        )
-    })?;
-
-    let qc_path = Path::new(&output_dir).join("CpG_coverage.xlsx");
-    println!("Generating QC report: {}", qc_path.display());
     let sample_stats =
         stats::calculate_coverage_stats(&methrix_data.cov_matrix, &methrix_data.sample_names);
-    crate::qc::report::generate_coverage_report(qc_path.to_str().unwrap(), &sample_stats)?;
-
-    if skip_annotation {
+    let annotation_result = if skip_annotation {
         println!("Skipping CpG annotation report (--skip-annotation)");
+        None
     } else {
-        let annotation_path = Path::new(&output_dir).join("CpG_annotation_report.xlsx");
-        println!(
-            "Generating CpG annotation report: {}",
-            annotation_path.display()
-        );
-        let annotation_result = crate::annotation::annotate_cpgs(
+        println!("Preparing CpG annotation report");
+        Some(crate::annotation::annotate_cpgs(
             &methrix_data.cpg_locations,
             &methrix_data.cov_matrix,
             &methrix_data.sample_names,
             &methrix_data.genome,
             annotation_dir.as_deref(),
-        )?;
-        annotation_result.write_excel_report(annotation_path.to_str().unwrap())?;
+        )?)
+    };
+
+    let mut output_set = AtomicOutputSet::new(output_directory)?;
+    println!("Staging HDF5 file: {}", assays_h5_path.display());
+    let staged_assays_path = output_set.stage(&assays_h5_path, |temporary_path| {
+        CustomHdf5Writer::write_methrix_object_to_path(temporary_path, &methrix_data)?;
+        validate_custom_hdf5(temporary_path).context("Staged HDF5 failed native validation")?;
+        Ok(())
+    })?;
+    output_set.stage(&alias_h5_path, |temporary_path| {
+        fs::copy(&staged_assays_path, temporary_path)
+            .with_context(|| format!("Failed to stage HDF5 alias {}", alias_h5_path.display()))?;
+        Ok(())
+    })?;
+
+    println!("Staging QC report: {}", qc_path.display());
+    output_set.stage(&qc_path, |temporary_path| {
+        crate::qc::report::generate_coverage_report_to_path(temporary_path, &sample_stats)
+    })?;
+
+    if let Some(annotation_result) = annotation_result {
+        println!("Staging annotation report: {}", annotation_path.display());
+        output_set.stage(&annotation_path, |temporary_path| {
+            annotation_result.write_excel_report_to_path(temporary_path)
+        })?;
+        println!(
+            "Staging annotation details: {}",
+            annotation_details_path.display()
+        );
+        output_set.stage(&annotation_details_path, |temporary_path| {
+            annotation_result.write_details_to_path(temporary_path)
+        })?;
+    } else {
+        output_set.remove(&annotation_path)?;
+        output_set.remove(&annotation_details_path)?;
     }
+
+    output_set.publish()?;
+    println!("Published HDF5 and report outputs atomically");
 
     println!("\nPipeline completed successfully!");
     Ok(())
@@ -351,6 +367,9 @@ fn find_bismark_files(dir: &str) -> Result<Vec<String>> {
 
     for entry in fs::read_dir(path).context("Failed to read input directory")? {
         let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
         let file_name = entry.file_name();
         let file_name_string = file_name.to_string_lossy();
         if file_name_string.ends_with(".bismark.cov.gz")
@@ -388,6 +407,75 @@ mod tests {
             "sample"
         );
         assert_eq!(extract_sample_name("/tmp/sample.cov").unwrap(), "sample");
+    }
+
+    #[test]
+    fn single_and_multi_thread_processing_are_equivalent() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use tempfile::tempdir;
+
+        let directory = tempdir().unwrap();
+        let mut files = Vec::new();
+        for (sample_name, first_counts, second_counts) in [
+            ("sample_a", (3, 1), (2, 2)),
+            ("sample_b", (1, 3), (4, 0)),
+            ("sample_c", (2, 2), (1, 3)),
+        ] {
+            let path = directory.path().join(format!("{}.cov", sample_name));
+            let first_percentage =
+                first_counts.0 as f64 * 100.0 / (first_counts.0 + first_counts.1) as f64;
+            let second_percentage =
+                second_counts.0 as f64 * 100.0 / (second_counts.0 + second_counts.1) as f64;
+            fs::write(
+                &path,
+                format!(
+                    "chr1\t10\t10\t{:.6}\t{}\t{}\nchr1\t20\t20\t{:.6}\t{}\t{}\n",
+                    first_percentage,
+                    first_counts.0,
+                    first_counts.1,
+                    second_percentage,
+                    second_counts.0,
+                    second_counts.1
+                ),
+            )
+            .unwrap();
+            files.push(path.to_string_lossy().into_owned());
+        }
+
+        let cpg_data = CpGData {
+            cpgs: vec![
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 9,
+                    end: 11,
+                    strand: '+',
+                },
+                CpGSite {
+                    chr: "chr1".to_string(),
+                    start: 19,
+                    end: 21,
+                    strand: '+',
+                },
+            ],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 100,
+            }],
+            release_name: "mini".to_string(),
+        };
+
+        let sequential = MethrixProcessor::new(cpg_data.clone())
+            .unwrap()
+            .process_files_parallel(files.clone(), 1, 1, false)
+            .unwrap();
+        let parallel = MethrixProcessor::new(cpg_data)
+            .unwrap()
+            .process_files_parallel(files, 3, 1, false)
+            .unwrap();
+
+        assert_eq!(sequential.sample_names, parallel.sample_names);
+        assert_eq!(sequential.beta_matrix, parallel.beta_matrix);
+        assert_eq!(sequential.cov_matrix, parallel.cov_matrix);
     }
 
     #[test]
@@ -465,12 +553,19 @@ mod tests {
         .unwrap();
 
         let assays_path = output_directory.join("assays.h5");
-        let compatibility_path = output_directory.join("methrix_data.h5");
+        let alias_path = output_directory.join("methrix_data.h5");
         assert!(assays_path.is_file());
-        assert!(compatibility_path.is_file());
+        assert!(alias_path.is_file());
+        assert_eq!(
+            fs::read(&assays_path).unwrap(),
+            fs::read(&alias_path).unwrap()
+        );
         assert!(output_directory.join("CpG_coverage.xlsx").is_file());
         assert!(output_directory
             .join("CpG_annotation_report.xlsx")
+            .is_file());
+        assert!(output_directory
+            .join("CpG_annotation_details.tsv.gz")
             .is_file());
 
         let file = hdf5::File::open(assays_path).unwrap();
@@ -500,6 +595,144 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
             vec!["sample_a", "sample_b"]
+        );
+    }
+
+    #[test]
+    fn skip_annotation_removes_both_stale_annotation_outputs() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use tempfile::tempdir;
+
+        let temporary_directory = tempdir().unwrap();
+        let input_directory = temporary_directory.path().join("input");
+        let output_directory = temporary_directory.path().join("output");
+        fs::create_dir_all(&input_directory).unwrap();
+        fs::create_dir_all(&output_directory).unwrap();
+
+        let cpg_data = CpGData {
+            cpgs: vec![CpGSite {
+                chr: "chr1".to_string(),
+                start: 9,
+                end: 11,
+                strand: '+',
+            }],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 20,
+            }],
+            release_name: "mini".to_string(),
+        };
+        let genome_path = temporary_directory.path().join("mini.ron");
+        fs::write(&genome_path, ron::ser::to_string(&cpg_data).unwrap()).unwrap();
+        fs::write(
+            input_directory.join("sample.cov"),
+            "chr1\t10\t10\t50.000000\t1\t1\n",
+        )
+        .unwrap();
+
+        let annotation_summary = output_directory.join("CpG_annotation_report.xlsx");
+        let annotation_details = output_directory.join("CpG_annotation_details.tsv.gz");
+        fs::write(&annotation_summary, "stale-summary").unwrap();
+        fs::write(&annotation_details, "stale-details").unwrap();
+
+        run_pipeline(PipelineConfig {
+            input_dir: input_directory.to_string_lossy().into_owned(),
+            output_dir: output_directory.to_string_lossy().into_owned(),
+            genome: genome_path.to_string_lossy().into_owned(),
+            threads: 1,
+            min_coverage: 1,
+            remove_uncovered: true,
+            annotation_dir: None,
+            skip_annotation: true,
+        })
+        .unwrap();
+
+        assert!(output_directory.join("assays.h5").is_file());
+        assert!(output_directory.join("methrix_data.h5").is_file());
+        assert!(output_directory.join("CpG_coverage.xlsx").is_file());
+        assert!(!annotation_summary.exists());
+        assert!(!annotation_details.exists());
+    }
+
+    #[test]
+    fn pipeline_failure_preserves_existing_output_set() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use tempfile::tempdir;
+
+        let temporary_directory = tempdir().unwrap();
+        let input_directory = temporary_directory.path().join("input");
+        let output_directory = temporary_directory.path().join("output");
+        let annotation_directory = temporary_directory.path().join("annotations");
+        fs::create_dir_all(&input_directory).unwrap();
+        fs::create_dir_all(&output_directory).unwrap();
+        fs::create_dir_all(&annotation_directory).unwrap();
+
+        let cpg_data = CpGData {
+            cpgs: vec![CpGSite {
+                chr: "chr1".to_string(),
+                start: 9,
+                end: 11,
+                strand: '+',
+            }],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 20,
+            }],
+            release_name: "mini".to_string(),
+        };
+        let genome_path = temporary_directory.path().join("mini.ron");
+        fs::write(&genome_path, ron::ser::to_string(&cpg_data).unwrap()).unwrap();
+        fs::write(
+            input_directory.join("sample.cov"),
+            "chr1\t10\t10\t50.000000\t1\t1\n",
+        )
+        .unwrap();
+
+        let old_outputs = [
+            ("assays.h5", b"old-assays".as_slice()),
+            ("methrix_data.h5", b"old-alias".as_slice()),
+            ("CpG_coverage.xlsx", b"old-qc".as_slice()),
+            ("CpG_annotation_report.xlsx", b"old-annotation".as_slice()),
+            (
+                "CpG_annotation_details.tsv.gz",
+                b"old-annotation-details".as_slice(),
+            ),
+        ];
+        for (file_name, contents) in old_outputs {
+            fs::write(output_directory.join(file_name), contents).unwrap();
+        }
+
+        let result = run_pipeline(PipelineConfig {
+            input_dir: input_directory.to_string_lossy().into_owned(),
+            output_dir: output_directory.to_string_lossy().into_owned(),
+            genome: genome_path.to_string_lossy().into_owned(),
+            threads: 1,
+            min_coverage: 1,
+            remove_uncovered: true,
+            annotation_dir: Some(annotation_directory.to_string_lossy().into_owned()),
+            skip_annotation: false,
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(output_directory.join("assays.h5")).unwrap(),
+            b"old-assays"
+        );
+        assert_eq!(
+            fs::read(output_directory.join("methrix_data.h5")).unwrap(),
+            b"old-alias"
+        );
+        assert_eq!(
+            fs::read(output_directory.join("CpG_coverage.xlsx")).unwrap(),
+            b"old-qc"
+        );
+        assert_eq!(
+            fs::read(output_directory.join("CpG_annotation_report.xlsx")).unwrap(),
+            b"old-annotation"
+        );
+        assert_eq!(
+            fs::read(output_directory.join("CpG_annotation_details.tsv.gz")).unwrap(),
+            b"old-annotation-details"
         );
     }
 

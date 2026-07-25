@@ -35,15 +35,25 @@ jobs:
           test -f /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.so
           pkg-config --modversion hdf5 || pkg-config --modversion hdf5-serial
 
-      - name: Download hg19 FASTA from UCSC
+      - name: Build methrix-cli with trusted download support
+        run: |
+          set -euo pipefail
+          cargo build --release --features download
+          ./target/release/methrix --help | head -n 20
+
+      - name: Download and verify hg19 with methrix-cli
         run: |
           set -euo pipefail
           mkdir -p testdata/hg19_genome
-          curl -L --retry 5 --retry-delay 5 \
-            -o testdata/hg19_genome/hg19.fa.gz \
-            https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz
-          gzip -t testdata/hg19_genome/hg19.fa.gz
-          ls -lh testdata/hg19_genome/hg19.fa.gz
+          ./target/release/methrix download-genome \
+            --genome hg19 \
+            --output testdata/hg19_genome
+          test -s testdata/hg19_genome/hg19.fa
+          test -s testdata/hg19_genome/hg19.fa.provenance.ron
+          ./target/release/methrix download-genome \
+            --genome hg19 \
+            --output testdata/hg19_genome
+          ls -lh testdata/hg19_genome/hg19.fa testdata/hg19_genome/hg19.fa.provenance.ron
 
       - name: Download hg19 GTF for annotation test
         run: |
@@ -55,19 +65,13 @@ jobs:
           gzip -t testdata/annotations/hg19.gtf.gz
           ls -lh testdata/annotations/hg19.gtf.gz
 
-      - name: Build methrix-cli
-        run: |
-          set -euo pipefail
-          cargo build --release
-          ./target/release/methrix --help | head -n 20
-
       - name: E2E test with GTF annotation
         run: |
           set -euo pipefail
           ./target/release/methrix process \
             --input testdata \
             --output testdata/output_e2e \
-            --genome testdata/hg19_genome/hg19.fa.gz \
+            --genome testdata/hg19_genome/hg19.fa \
             --annotation-dir testdata/annotations \
             --threads 4 \
             --min-coverage 1 \
@@ -77,9 +81,12 @@ jobs:
           test -s testdata/output_e2e/methrix_data.h5
           test -s testdata/output_e2e/CpG_coverage.xlsx
           test -s testdata/output_e2e/CpG_annotation_report.xlsx
+          test -s testdata/output_e2e/CpG_annotation_details.tsv.gz
+          gzip -t testdata/output_e2e/CpG_annotation_details.tsv.gz
 
-          # Verify annotation report sheets (GTF-only mode)
+          # The workbook is bounded summary data; unbounded CpG details are TSV.gz.
           python3 - <<'PY'
+          import gzip
           import zipfile
           from pathlib import Path
 
@@ -88,14 +95,23 @@ jobs:
           with zipfile.ZipFile(report) as zf:
             workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
           assert "ChIPseeker_By_Sample" in workbook_xml, "missing ChIPseeker_By_Sample sheet"
-          assert "CpG_Details" in workbook_xml, "missing CpG_Details sheet"
+          assert "CpG_Details" not in workbook_xml, "unbounded CpG_Details must not be stored in Excel"
           assert "ChIPseeker_Summary" not in workbook_xml, "legacy ChIPseeker_Summary should not exist"
           assert "CpG_Context" not in workbook_xml, "legacy CpG_Context sheet should not exist"
+
+          details = Path("testdata/output_e2e/CpG_annotation_details.tsv.gz")
+          with gzip.open(details, "rt", encoding="utf-8") as handle:
+            header = handle.readline().rstrip("\n").split("\t")
+          assert header == [
+            "chr", "start_1based", "end_1based", "strand", "annotation",
+            "gene_id", "gene_symbol", "transcript_id", "distance_to_tss",
+            "exon_intron_rank",
+          ], f"unexpected annotation detail header: {header}"
           PY
 
           ls -lh testdata/output_e2e
 
-      - name: R HDF5 compatibility check
+      - name: R rhdf5 direct schema check
         run: |
           set -euo pipefail
           Rscript tests/integration/test_r_compatibility.R testdata/output_e2e/assays.h5
@@ -108,14 +124,16 @@ jobs:
             --output testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
           test -s testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
 
-      - name: Upload QC Excel artifacts
+      - name: Upload QC and annotation artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: methrix-qc-excel-${{ github.run_id }}
+          name: methrix-qc-annotation-${{ github.run_id }}
           path: |
+            testdata/hg19_genome/hg19.fa.provenance.ron
             testdata/output_e2e/CpG_coverage.xlsx
             testdata/output_e2e/CpG_coverage_recomputed_from_h5.xlsx
             testdata/output_e2e/CpG_annotation_report.xlsx
+            testdata/output_e2e/CpG_annotation_details.tsv.gz
           if-no-files-found: error
           retention-days: 14

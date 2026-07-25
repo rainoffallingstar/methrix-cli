@@ -1,30 +1,78 @@
-use anyhow::Result;
-use std::path::PathBuf;
-use tempfile::TempDir;
+use methrix_cli::hdf5::validate_custom_hdf5;
+use std::fs;
+use std::process::Command;
+use tempfile::tempdir;
 
 #[test]
-fn test_full_pipeline() {
-    // This test requires actual data files
-    // For now, we'll test the individual components
+fn process_command_runs_minimal_pipeline_from_fasta() {
+    let temporary_directory = tempdir().unwrap();
+    let input_directory = temporary_directory.path().join("input");
+    let output_directory = temporary_directory.path().join("output");
+    fs::create_dir_all(&input_directory).unwrap();
 
-    // Test CpG extraction
-    let extractor = crate::genome::cpg::CpGExtractor::new("test_data/hg19.fa".to_string());
-    // ... (would need test data)
-}
+    let genome_path = temporary_directory.path().join("mini.fa");
+    fs::write(&genome_path, ">chr1\nAACGTTTCGAA\n").unwrap();
+    fs::write(
+        input_directory.join("sample.cov"),
+        concat!(
+            "chr1\t3\t3\t75.000000\t3\t1\n",
+            "chr1\t8\t8\t25.000000\t1\t3\n"
+        ),
+    )
+    .unwrap();
 
-#[test]
-fn test_bismark_reader() {
-    use crate::bismark::BismarkReader;
+    let command_output = Command::new(env!("CARGO_BIN_EXE_methrix"))
+        .arg("process")
+        .arg("--input")
+        .arg(&input_directory)
+        .arg("--output")
+        .arg(&output_directory)
+        .arg("--genome")
+        .arg(&genome_path)
+        .arg("--threads")
+        .arg("2")
+        .arg("--min-coverage")
+        .arg("1")
+        .arg("--skip-annotation")
+        .output()
+        .unwrap();
 
-    let reader = BismarkReader::new("test_data/sample.bismark.cov.gz".to_string());
-    // ... (would need test data)
-}
+    assert!(
+        command_output.status.success(),
+        "methrix process failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&command_output.stdout),
+        String::from_utf8_lossy(&command_output.stderr)
+    );
 
-#[test]
-fn test_h5_compatibility() {
-    // This test verifies H5 file can be loaded by R
-    // After running the pipeline, test with:
-    // library(methrix)
-    // m <- load_HDF5_methrix("tests/output/methrix_data.h5")
-    // print(m)
+    let assays_path = output_directory.join("assays.h5");
+    let alias_path = output_directory.join("methrix_data.h5");
+    let summary = validate_custom_hdf5(&assays_path).unwrap();
+    assert_eq!(summary.sample_count, 1);
+    assert_eq!(summary.cpg_count, 2);
+    assert_eq!(summary.genome, "mini");
+    assert_eq!(
+        fs::read(&assays_path).unwrap(),
+        fs::read(alias_path).unwrap()
+    );
+    assert!(output_directory.join("CpG_coverage.xlsx").is_file());
+    assert!(!output_directory.join("CpG_annotation_report.xlsx").exists());
+    assert!(!output_directory
+        .join("CpG_annotation_details.tsv.gz")
+        .exists());
+
+    let file = hdf5::File::open(assays_path).unwrap();
+    assert_eq!(file.dataset("cov").unwrap().shape(), vec![1, 2]);
+    assert_eq!(
+        file.dataset("cov").unwrap().read_raw::<u32>().unwrap(),
+        vec![4, 4]
+    );
+    assert_eq!(
+        file.group("rowData")
+            .unwrap()
+            .dataset("start")
+            .unwrap()
+            .read_raw::<u32>()
+            .unwrap(),
+        vec![3, 8]
+    );
 }

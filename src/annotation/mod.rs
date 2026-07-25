@@ -1,18 +1,20 @@
 use anyhow::{Context, Result};
-use flate2::read::GzDecoder;
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use ndarray::Array2;
 use rust_xlsxwriter::Workbook;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
+use crate::atomic_output::{write_atomically, AtomicOutputSet};
 use crate::cli::process::canonical_contig_name;
 use crate::genome::cpg::CpGSite;
 
 const PROMOTER_WINDOW: u32 = 3_000;
 const DOWNSTREAM_WINDOW: u32 = 3_000;
+const QCTB_REQUIRED_ANNOTATIONS: [&str; 4] = ["Promoter", "Exon", "Intron", "Intergenic"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GenomicAnnotation {
@@ -139,6 +141,12 @@ pub struct SampleAnnotationRow {
 
 impl AnnotationResult {
     pub fn write_excel_report(&self, output_path: &str) -> Result<()> {
+        write_atomically(Path::new(output_path), |temporary_path| {
+            self.write_excel_report_to_path(temporary_path)
+        })
+    }
+
+    pub(crate) fn write_excel_report_to_path(&self, output_path: &Path) -> Result<()> {
         let mut workbook = Workbook::new();
 
         let _sheet_by_sample = workbook.add_worksheet();
@@ -147,10 +155,7 @@ impl AnnotationResult {
             .context("Failed to get by-sample worksheet")?;
         sheet_by_sample.set_name("ChIPseeker_By_Sample")?;
 
-        let mut annotations: Vec<String> =
-            self.records.iter().map(|r| r.annotation.clone()).collect();
-        annotations.sort();
-        annotations.dedup();
+        let annotations = self.report_annotations();
 
         sheet_by_sample.write_string(0, 0, "sample")?;
         sheet_by_sample.write_string(0, 1, "covered_cpgs")?;
@@ -161,8 +166,8 @@ impl AnnotationResult {
             col += 2;
         }
 
-        for (idx, sample_row) in self.sample_summary.iter().enumerate() {
-            let row = (idx + 1) as u32;
+        for (sample_index, sample_row) in self.sample_summary.iter().enumerate() {
+            let row = (sample_index + 1) as u32;
             sheet_by_sample.write_string(row, 0, &sample_row.sample_name)?;
             sheet_by_sample.write_number(row, 1, sample_row.covered_cpgs as f64)?;
 
@@ -180,45 +185,88 @@ impl AnnotationResult {
             }
         }
 
-        let _sheet_details = workbook.add_worksheet();
-        let sheet_details = workbook
-            .worksheet_from_index(1)
-            .context("Failed to get details worksheet")?;
-        sheet_details.set_name("CpG_Details")?;
-
-        let headers = [
-            "chr",
-            "start_1based",
-            "end_1based",
-            "strand",
-            "annotation",
-            "gene_id",
-            "gene_symbol",
-            "transcript_id",
-            "distance_to_tss",
-            "exon_intron_rank",
-        ];
-        for (col, header) in headers.iter().enumerate() {
-            sheet_details.write_string(0, col as u16, *header)?;
-        }
-
-        for (idx, rec) in self.records.iter().enumerate() {
-            let row = (idx + 1) as u32;
-            sheet_details.write_string(row, 0, &rec.chr)?;
-            sheet_details.write_number(row, 1, rec.start_1based as f64)?;
-            sheet_details.write_number(row, 2, rec.end_1based as f64)?;
-            sheet_details.write_string(row, 3, rec.strand.to_string())?;
-            sheet_details.write_string(row, 4, &rec.annotation)?;
-            sheet_details.write_string(row, 5, &rec.gene_id)?;
-            sheet_details.write_string(row, 6, &rec.gene_symbol)?;
-            sheet_details.write_string(row, 7, &rec.transcript_id)?;
-            sheet_details.write_number(row, 8, rec.distance_to_tss as f64)?;
-            sheet_details.write_string(row, 9, &rec.exon_intron_rank)?;
-        }
-
         workbook.save(output_path)?;
         Ok(())
     }
+
+    pub fn write_report_set(&self, summary_path: &str, details_path: &str) -> Result<()> {
+        let summary_path = Path::new(summary_path);
+        let details_path = Path::new(details_path);
+        let output_directory = summary_path.parent().unwrap_or_else(|| Path::new("."));
+        let mut output_set = AtomicOutputSet::new(output_directory)?;
+        output_set.stage(summary_path, |temporary_path| {
+            self.write_excel_report_to_path(temporary_path)
+        })?;
+        output_set.stage(details_path, |temporary_path| {
+            self.write_details_to_path(temporary_path)
+        })?;
+        output_set.publish()
+    }
+
+    pub(crate) fn write_details_to_path(&self, output_path: &Path) -> Result<()> {
+        let output_file = File::create(output_path)
+            .with_context(|| format!("Failed to create {}", output_path.display()))?;
+        let encoder = GzEncoder::new(output_file, Compression::default());
+        let mut writer = std::io::BufWriter::new(encoder);
+        writeln!(
+            writer,
+            "chr\tstart_1based\tend_1based\tstrand\tannotation\tgene_id\tgene_symbol\ttranscript_id\tdistance_to_tss\texon_intron_rank"
+        )?;
+        for record in &self.records {
+            let values = [
+                record.chr.as_str(),
+                &record.start_1based.to_string(),
+                &record.end_1based.to_string(),
+                &record.strand.to_string(),
+                record.annotation.as_str(),
+                record.gene_id.as_str(),
+                record.gene_symbol.as_str(),
+                record.transcript_id.as_str(),
+                &record.distance_to_tss.to_string(),
+                record.exon_intron_rank.as_str(),
+            ];
+            writeln!(
+                writer,
+                "{}",
+                values
+                    .iter()
+                    .map(|value| escape_tsv_field(value))
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            )?;
+        }
+        writer.flush()?;
+        let encoder = writer.into_inner().map_err(|error| error.into_error())?;
+        encoder.finish()?.sync_all()?;
+        Ok(())
+    }
+
+    fn report_annotations(&self) -> Vec<String> {
+        let mut extras: Vec<String> = self
+            .records
+            .iter()
+            .map(|record| record.annotation.clone())
+            .filter(|annotation| !QCTB_REQUIRED_ANNOTATIONS.contains(&annotation.as_str()))
+            .collect();
+        extras.sort();
+        extras.dedup();
+
+        QCTB_REQUIRED_ANNOTATIONS
+            .iter()
+            .map(|annotation| (*annotation).to_string())
+            .chain(extras)
+            .collect()
+    }
+}
+
+fn escape_tsv_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\t' | '\n' | '\r' => ' ',
+            other => other,
+        })
+        .collect()
 }
 
 pub fn annotate_cpgs(
@@ -770,6 +818,59 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn report_always_contains_qctb_required_annotation_columns() {
+        let result = AnnotationResult {
+            records: vec![AnnotationRecord {
+                chr: "chr1".to_string(),
+                start_1based: 10,
+                end_1based: 11,
+                strand: '+',
+                annotation: "5' UTR".to_string(),
+                gene_id: String::new(),
+                gene_symbol: String::new(),
+                transcript_id: String::new(),
+                distance_to_tss: 0,
+                exon_intron_rank: String::new(),
+            }],
+            sample_summary: Vec::new(),
+        };
+
+        assert_eq!(
+            result.report_annotations(),
+            vec!["Promoter", "Exon", "Intron", "Intergenic", "5' UTR"]
+        );
+    }
+
+    #[test]
+    fn writes_unbounded_annotation_details_as_gzip_tsv() {
+        let directory = tempfile::tempdir().unwrap();
+        let details_path = directory.path().join("details.tsv.gz");
+        let result = AnnotationResult {
+            records: vec![AnnotationRecord {
+                chr: "chr1".to_string(),
+                start_1based: 10,
+                end_1based: 11,
+                strand: '+',
+                annotation: "Promoter".to_string(),
+                gene_id: "gene\t1".to_string(),
+                gene_symbol: "G1".to_string(),
+                transcript_id: "tx1".to_string(),
+                distance_to_tss: -5,
+                exon_intron_rank: String::new(),
+            }],
+            sample_summary: Vec::new(),
+        };
+
+        result.write_details_to_path(&details_path).unwrap();
+        let file = File::open(details_path).unwrap();
+        let mut reader = std::io::BufReader::new(GzDecoder::new(file));
+        let mut decoded = String::new();
+        std::io::Read::read_to_string(&mut reader, &mut decoded).unwrap();
+        assert!(decoded.starts_with("chr\tstart_1based\tend_1based"));
+        assert!(decoded.contains("gene 1"));
+    }
 
     #[test]
     fn gtf_chr_aliases_match_cpg_contig_names() -> Result<()> {

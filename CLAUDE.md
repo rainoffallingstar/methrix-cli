@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Methrix CLI is a high-performance Rust command-line tool for processing Bismark bisulfite sequencing data into methrix-compatible HDF5 format. It serves as a complete Rust alternative to the original R implementation (methrix R package), achieving 5-10x performance improvements while maintaining 100% compatibility with the R package.
+Methrix CLI is a high-performance Rust command-line tool for processing Bismark bisulfite sequencing data into a versioned custom HDF5 schema. It is a Rust-native processing alternative inspired by the methrix R package, with direct R interoperability through `rhdf5` dataset access.
 
-**Key constraint**: The generated HDF5 files MUST be compatible with R's `HDF5Array::loadHDF5SummarizedExperiment()` and methrix's `load_HDF5_methrix()`.
+**Key constraint**: Generated files MUST satisfy `methrix-cli.custom-hdf5/1.0.0`, pass the Rust-native validator before publication, and truthfully identify their loader contract. They are not standard `saveHDF5SummarizedExperiment()` directories and MUST NOT be described as directly loadable by `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
 
 ## Build and Development Commands
 
@@ -16,15 +16,13 @@ cargo build                  # Development build
 cargo build --release        # Optimized release build (with LTO, strip, opt-level 3)
 cargo clean                  # Clean build artifacts
 
-# Testing
-cargo test                   # Run all tests
-cargo test --test '*'        # Run integration tests
-cargo bench                  # Run benchmarks
-
-# Code quality
-cargo fmt                    # Format code
-cargo clippy                 # Lint code
-cargo audit                  # Security audit
+# Testing and quality gates
+cargo fmt --all -- --check
+cargo check --all-targets --all-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+cargo build --all-targets --all-features --locked
+cargo bench                  # Run benchmarks when performance changes
 
 # Running the tool
 ./target/release/methrix --help
@@ -68,8 +66,9 @@ The project follows a **layered architecture** with clear module separation:
                       ↓
 ┌─────────────────────────────────────────────────┐
 │      Output Layer (hdf5/, qc/)                   │  ← Results
-│  - HDF5 writing (SummarizedExperiment compatible)│
-│  - QC report generation (Excel)                  │
+│  - HDF5 writing (versioned custom schema)        │
+│  - Native pre-publication schema validation       │
+│  - QC and split annotation reports                │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -95,7 +94,8 @@ src/
 │   ├── stats.rs         # Statistics (SampleStats)
 │   └── mod.rs
 ├── hdf5/                # HDF5 I/O
-│   ├── se_compat.rs     # SE-compatible writer
+│   ├── se_compat.rs     # Versioned custom HDF5 writer
+│   ├── validate.rs      # Native schema/readback validator
 │   └── mod.rs
 └── qc/                  # Quality control
     ├── report.rs        # Excel report generation
@@ -147,7 +147,7 @@ pub struct SampleStats {
 3. **Processing**: Parallel alignment to CpG sites → `MethrixProcessor`
 4. **Filtering**: Remove uncovered loci → `filter::remove_uncovered()`
 5. **Statistics**: Calculate coverage → `stats::calculate_coverage_stats()`
-6. **Output**: HDF5 (R-compatible) + Excel QC report
+6. **Output**: versioned custom HDF5 + Excel QC summary + Excel/TSV.gz annotation report set
 
 ## R Function Porting Map
 
@@ -159,40 +159,41 @@ The Rust implementation ports these specific R functions from the methrix packag
 - `coverage_filter()` → `filter::coverage_filter()`
 - `get_stats()` → `stats::calculate_coverage_stats()`
 
-## HDF5 Output Structure (R Compatibility Critical)
+## HDF5 Output Structure
 
-The generated H5 file MUST be compatible with R's `HDF5Array::loadHDF5SummarizedExperiment()`:
+The primary `assays.h5` and identical `methrix_data.h5` alias use the versioned `methrix-cli.custom-hdf5/1.0.0` contract. Direct `rhdf5` access is supported; standard HDF5Array and methrix loaders are explicitly unsupported.
 
 ```
-methrix_data.h5
-├── assays/
-│   ├── beta          # f32 matrix (methylation values)
-│   └── cov           # u16 matrix (coverage counts)
+assays.h5
+├── beta                      # chunked f32 [sample, CpG]
+├── cov                       # chunked u32 [sample, CpG]
 ├── rowData/
-│   ├── chr           # String array (chromosomes)
-│   ├── start         # u32 array (0-based positions)
-│   ├── end           # u32 array
-│   └── strand        # String array (strands)
+│   ├── chr, seqnames         # chromosome strings
+│   ├── start, end, width     # 1-based closed u32 coordinates
+│   └── strand                # +, -, or *
 ├── colData/
-│   └── sample_id     # String array (sample names)
+│   ├── sample_id
+│   └── sample_name
 └── metadata/
-    ├── genome        # Scalar (reference genome name)
-    └── is_h5         # Scalar (HDF5 format flag)
+    ├── genome
+    ├── schema_name
+    ├── schema_version
+    ├── loader_compatibility
+    └── is_h5
 ```
 
-**Key compatibility requirements**:
-- Use HDF5 Group structure (assays/, rowData/, colData/, metadata/)
-- Column-major storage order (R default)
-- GZIP compression (level 6)
-- SE-specific attributes (se_version, delayed_array_type)
-- Data types: beta (f32), cov (u16)
+**Required behavior**:
+- Keep beta as `f32` and coverage as `u32`.
+- Keep assays chunked and satisfy `cov == 0` if and only if beta is NaN.
+- Run `validate_custom_hdf5()` against staged files before publication.
+- Do not introduce `se.rds` or claim compatibility without a real loader test and schema version change.
 
 ## Performance Optimization Patterns
 
-1. **Memory optimization**: Use `u16` instead of `u32` for coverage, `f32` instead of `f64` for methylation values
-2. **Zero-copy**: Memory mapping for large files (`memmap2`)
-3. **Data parallelism**: `rayon` for concurrent processing (configurable thread pools)
-4. **I/O optimization**: Streaming file processing, batch HDF5 writes
+1. **Bounded HDF5 writes**: write one sample/CpG block at a time without a full transposed assay copy.
+2. **Bounded sample concurrency**: limit active per-sample temporary vectors with the configured Rayon pool.
+3. **Single-pass statistics**: avoid full temporary columns and covered-value vectors.
+4. **Transactional outputs**: stage, sync, validate, and publish the complete output set with rollback.
 
 ## Key Design Patterns
 
@@ -203,10 +204,10 @@ methrix_data.h5
 
 ## Important Coordinate System
 
-- **Bismark files**: 1-based coordinates (converted to 0-based internally)
-- **Internal representation**: 0-based coordinates
-- **HDF5 output**: 0-based coordinates (R bioconductor standard)
-- When reading Bismark files, always subtract 1 from start position
+- **Bismark files**: 1-based single-base coordinates; start is converted to 0-based internally.
+- **Internal CpG representation**: 0-based start and end-exclusive interval.
+- **HDF5 rowData**: 1-based closed `start`/`end` with checked `width = end - start + 1`.
+- Bismark records with `end != start` are rejected.
 
 ## CLI Commands
 
@@ -233,10 +234,7 @@ methrix qc-report -i <h5_dir> -o <output.xlsx>
 
 ## Performance Characteristics
 
-- **5-10x faster** than R implementation
-- **30-50% less memory** usage
-- **Sub-second startup** time
-- Optimizations: memory mapping, parallel processing, efficient data types
+Do not repeat unverified speed or memory percentages. The enforced properties are bounded chunked HDF5 writing, a thread-bounded processing pool, single-pass coverage statistics, and rollback-capable publication. Benchmark representative RRBS/WGBS datasets before making quantitative performance claims.
 
 ## Type-First Development
 

@@ -42,6 +42,14 @@ pub fn remove_uncovered(
         anyhow::bail!("No CpGs have coverage in any sample");
     }
 
+    if n_covered == n_cpgs {
+        println!(
+            "-Removed 0 uncovered CpGs (retained {})",
+            n_cpgs.separated_string()
+        );
+        return Ok((beta_matrix, cov_matrix, (0..n_cpgs).collect()));
+    }
+
     println!(
         "-Removed {} uncovered CpGs (retained {})",
         (n_cpgs - n_covered).separated_string(),

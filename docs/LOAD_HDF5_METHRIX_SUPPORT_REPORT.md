@@ -1,5 +1,7 @@
 # load_HDF5_methrix() 完整支持实现报告
 
+> **历史报告，当前不再适用。** 当前 `methrix-cli.custom-hdf5/1.0.0` 不生成 `se.rds`，并明确不支持 `HDF5Array::loadHDF5SummarizedExperiment()` 或 `methrix::load_HDF5_methrix()` 直接加载。受支持的 R 互操作路径是 `rhdf5` 直接读取版本化 datasets；任何标准 loader 兼容工作都必须采用新 schema 版本并加入真实 loader smoke test。
+
 ## 实现时间
 2026-02-22
 

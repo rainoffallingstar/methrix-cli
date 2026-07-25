@@ -1,10 +1,25 @@
 use anyhow::{Context, Result};
 use rust_xlsxwriter::Workbook;
+use std::path::Path;
+
+use crate::atomic_output::write_atomically;
 
 pub struct QCReportGenerator;
 
 pub fn generate_coverage_report(
     output_path: &str,
+    sample_stats: &[crate::processing::stats::SampleStats],
+) -> Result<()> {
+    write_atomically(Path::new(output_path), |temporary_path| {
+        generate_coverage_report_to_path(temporary_path, sample_stats)
+    })?;
+
+    println!("QC report saved to: {}", output_path);
+    Ok(())
+}
+
+pub(crate) fn generate_coverage_report_to_path(
+    output_path: &Path,
     sample_stats: &[crate::processing::stats::SampleStats],
 ) -> Result<()> {
     let mut workbook = Workbook::new();
@@ -41,8 +56,6 @@ pub fn generate_coverage_report(
     }
 
     workbook.save(output_path)?;
-
-    println!("QC report saved to: {}", output_path);
     Ok(())
 }
 

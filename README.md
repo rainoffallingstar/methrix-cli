@@ -8,7 +8,7 @@ High-performance methylation data processor - Bismark to HDF5 conversion tool.
 
 - **Fast CpG extraction** from reference genome FASTA files
 - **Efficient Bismark file processing** with parallel support
-- **HDF5 output** compatible with R's methrix package
+- **Versioned custom HDF5 output** for direct access with R's `rhdf5`
 - **Quality control reports** in Excel format
 - **Cross-platform** standalone binary
 
@@ -72,6 +72,8 @@ methrix qc-report \
 ```
 
 ### Download reference genomes
+
+The download command requires `--features download`. Built-in releases (`hg19`, `hg38`, `mm10`, and `mm39`) are pinned to UCSC HTTPS URLs and official compressed-source MD5 values. Downloads are streamed with timeout and size limits, verified before publication, and atomically installed as `<release>.fa` together with `<release>.fa.provenance.ron`. Cached FASTA files are reused only after their provenance, byte size, and FASTA MD5 are revalidated.
 
 ```bash
 # Download built-in genome (hg19, hg38, mm10, mm39)
@@ -145,23 +147,30 @@ Options:
 
 ### HDF5 file structure
 
-The generated H5 file is compatible with R's `HDF5Array::loadHDF5SummarizedExperiment()`:
+The generated H5 file uses the versioned `methrix-cli.custom-hdf5` schema. It is designed for direct dataset access with R's `rhdf5`; it is **not** a standard `saveHDF5SummarizedExperiment()` directory and is not currently loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
+
+`assays.h5` is the primary file. `methrix_data.h5` is an identical filename alias, not a different compatibility format:
 
 ```
 methrix_data.h5
-├── assays/
-│   ├── beta          # Methylation matrix (f32)
-│   └── cov           # Coverage matrix (u16)
+├── beta              # Methylation matrix (f32)
+├── cov               # Coverage matrix (u32)
 ├── rowData/
 │   ├── chr           # Chromosome
-│   ├── start         # Start position (0-based)
-│   ├── end           # End position
-│   └── strand        # Strand (+)
+│   ├── seqnames      # Chromosome alias for direct R access
+│   ├── start         # Start position (1-based, closed)
+│   ├── end           # End position (1-based, closed)
+│   ├── width         # Closed interval width
+│   └── strand        # Strand (+/-/*)
 ├── colData/
-│   └── sample_id     # Sample names
+│   ├── sample_id     # Sample names
+│   └── sample_name   # Sample name alias
 └── metadata/
-    ├── genome        # Reference genome name
-    └── is_h5         # HDF5 format flag
+    ├── genome                # Reference genome name
+    ├── is_h5                 # HDF5 format flag
+    ├── schema_name           # methrix-cli.custom-hdf5
+    ├── schema_version        # Current schema version
+    └── loader_compatibility  # Explicit supported/unsupported loader contract
 ```
 
 ### QC report
@@ -173,13 +182,16 @@ Excel file with coverage statistics:
 
 ### CpG annotation report
 
-`CpG_annotation_report.xlsx` (generated automatically by `methrix process`) contains:
-- `ChIPseeker_By_Sample` sheet: per-sample genomic annotation counts and percentages
-- `CpG_Details` sheet: per-CpG genomic annotation fields (GTF-based)
+`methrix process` publishes the annotation outputs as one transaction with HDF5 and QC outputs:
 
-## R integration
+- `CpG_annotation_report.xlsx`: bounded `ChIPseeker_By_Sample` summary data. The required qctb categories `Promoter`, `Exon`, `Intron`, and `Intergenic` are always present, including zero-count columns; additional categories follow in lexical order.
+- `CpG_annotation_details.tsv.gz`: unbounded per-CpG GTF annotation details with chromosome, 1-based closed coordinates, strand, annotation, gene, transcript, TSS distance, and exon/intron rank.
 
-The generated H5 files can be loaded in R using `rhdf5`:
+The details table is intentionally not stored in Excel, so WGBS-sized datasets are not constrained by Excel's 1,048,576-row worksheet limit. `--skip-annotation` transactionally removes stale copies of both annotation outputs.
+
+## R direct-schema integration
+
+The generated H5 files can be read directly with `rhdf5`. The following example manually constructs a `SummarizedExperiment` in memory; this does not claim that the file itself satisfies the standard HDF5Array loader contract:
 
 ```r
 library(rhdf5)
@@ -199,7 +211,7 @@ strand <- h5read(h5_file, "/rowData/strand")
 library(SummarizedExperiment)
 library(GenomicRanges)
 
-gr <- GRanges(chr, IRanges(start + 1, end), strand)
+gr <- GRanges(chr, IRanges(start, end), strand)
 coldata <- DataFrame(sample_id = h5read(h5_file, "/colData/sample_id"))
 
 se <- SummarizedExperiment(
@@ -213,25 +225,21 @@ assay(se, "beta")
 assay(se, "cov")
 ```
 
-**Note**: For full compatibility with R methrix package functions, you can convert to bedgraph format and use `read_bedgraphs()`. See [docs/QUICK_START_LOADING.md](docs/QUICK_START_LOADING.md) for details.
+**Loader status**: `HDF5Array` and `methrix` are not available in the current validation environment, and the custom schema intentionally does not claim compatibility with their standard loaders. No synthetic `se.rds` is generated.
+
+For methrix package workflows, convert through an explicitly supported interchange format and validate that downstream path independently.
 
 ## Performance
 
-Compared to the original R package:
-- **5-10x faster** I/O processing
-- **30-50% less memory** usage
-- **Sub-second startup** time
+The assay writer stores sample-by-CpG HDF5 datasets with explicit chunking and writes bounded CpG blocks instead of materializing a full transposed copy. The processing pool limits concurrent per-sample temporary vectors to `--threads`, and HDF5, QC, and annotation outputs are staged and published as one rollback-capable transaction after native schema validation.
 
 ## Development
 
 ### Run tests
 
 ```bash
-# Unit tests
-cargo test
-
-# Integration tests (requires test data)
-cargo test --test '*'
+# Unit and real minimal CLI integration tests
+cargo test --all-targets --all-features --locked
 
 # Benchmarks
 cargo bench

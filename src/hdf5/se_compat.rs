@@ -1,97 +1,122 @@
 use anyhow::{Context, Result};
 use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group};
-use ndarray::Array2;
+use ndarray::{s, Array2};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-pub struct SummarizedExperimentWriter {
-    output_path: String,
+use crate::atomic_output::write_atomically;
+
+pub const SCHEMA_NAME: &str = "methrix-cli.custom-hdf5";
+pub const SCHEMA_VERSION: &str = "1.0.0";
+pub const LOADER_COMPATIBILITY: &str = "rhdf5 direct schema access only; not compatible with HDF5Array::loadHDF5SummarizedExperiment or methrix::load_HDF5_methrix";
+const TARGET_ASSAY_CHUNK_BYTES: usize = 1024 * 1024;
+
+pub struct CustomHdf5Writer {
+    output_path: PathBuf,
 }
 
-impl SummarizedExperimentWriter {
+impl CustomHdf5Writer {
     pub fn new(output_path: String) -> Self {
-        Self { output_path }
+        Self {
+            output_path: PathBuf::from(output_path),
+        }
     }
 
-    /// Write methrix object as H5 format - compatible with R::load_HDF5_summarized_experiment
+    /// Write the versioned methrix-cli custom HDF5 schema atomically.
     pub fn write_methrix_object(
         &self,
         methrix_data: &crate::cli::process::MethrixData,
     ) -> Result<()> {
-        let file = File::create(&self.output_path).context("Failed to create HDF5 file")?;
-        self.write_se_attributes(&file)?;
+        write_atomically(&self.output_path, |temporary_path| {
+            Self::write_methrix_object_to_path(temporary_path, methrix_data)?;
+            crate::hdf5::validate::validate_custom_hdf5(temporary_path)?;
+            Ok(())
+        })
+    }
 
-        // 1. Write assays (required for both direct reading and se.rds)
-        self.write_assay(&file, "beta", &methrix_data.beta_matrix)?;
-        self.write_assay(&file, "cov", &methrix_data.cov_matrix)?;
+    pub(crate) fn write_methrix_object_to_path(
+        output_path: &Path,
+        methrix_data: &crate::cli::process::MethrixData,
+    ) -> Result<()> {
+        let file = File::create(output_path).context("Failed to create HDF5 file")?;
 
-        // 2. Write rowData (for se.rds creation support)
+        Self::write_assay(&file, "beta", &methrix_data.beta_matrix)?;
+        Self::write_assay(&file, "cov", &methrix_data.cov_matrix)?;
+
         let rowdata_group = file
             .create_group("rowData")
             .context("Failed to create rowData group")?;
-        self.write_rowdata(&rowdata_group, &methrix_data.cpg_locations)?;
+        Self::write_rowdata(&rowdata_group, &methrix_data.cpg_locations)?;
 
-        // 3. Write colData (for se.rds creation support)
         let coldata_group = file
             .create_group("colData")
             .context("Failed to create colData group")?;
-        self.write_coldata(&coldata_group, &methrix_data.sample_names)?;
+        Self::write_coldata(&coldata_group, &methrix_data.sample_names)?;
 
-        // 4. Write metadata (for se.rds creation support)
         let metadata_group = file
             .create_group("metadata")
             .context("Failed to create metadata group")?;
-        self.write_metadata(&metadata_group, &methrix_data.genome)?;
+        Self::write_metadata(&metadata_group, &methrix_data.genome)?;
 
+        file.flush().context("Failed to flush HDF5 file")?;
         Ok(())
     }
 
     fn write_assay<T: hdf5::H5Type + Copy>(
-        &self,
         group: &Group,
         name: &str,
         data: &Array2<T>,
     ) -> Result<()> {
-        let (n_cpgs, n_samples) = data.dim(); // data is [n_cpgs, n_samples] in row-major
-
-        // R/HDF5 uses column-major: matrix[cpg, sample]
-        // We'll create HDF5 dataset with shape [n_samples, n_cpgs] in C layout
-        // This will appear in R as [n_cpgs, n_samples] after automatic transpose
-        //
-        // Data order in Vec: [cpg1_s1, cpg2_s1, ..., cpgN_s1, cpg1_s2, cpg2_s2, ...]
-        // Shape [n_samples, n_cpgs] C-layout stores as:
-        //   row 0: [cpg1_s1, cpg2_s1, ..., cpgN_s1]
-        //   row 1: [cpg1_s2, cpg2_s2, ..., cpgN_s2]
-        // Which is exactly our Vec order!
-        let mut col_major_data: Vec<T> = Vec::with_capacity(n_cpgs * n_samples);
-        for sample_idx in 0..n_samples {
-            for cpg_idx in 0..n_cpgs {
-                col_major_data.push(data[(cpg_idx, sample_idx)]);
-            }
+        let (n_cpgs, n_samples) = data.dim();
+        if n_cpgs == 0 || n_samples == 0 {
+            anyhow::bail!(
+                "Cannot write assay {} with zero-sized dimensions {:?}",
+                name,
+                data.dim()
+            );
         }
 
-        // Create C-layout 2D array with shape [n_samples, n_cpgs]
-        use ndarray::Array2;
-        let reshaped = Array2::from_shape_vec((n_samples, n_cpgs), col_major_data)
-            .context("Failed to reshape assay data")?;
-
-        // Write the 2D array - it's contiguous in C layout.
-        // Use .view() to get ArrayView2<T> which pins D=Ix2 for type inference.
-        let builder = group.new_dataset_builder();
-        let _dataset = builder
-            .with_data(reshaped.view())
+        // R/HDF5 uses column-major matrices. Store [sample, CpG] in HDF5 C
+        // layout so direct R readers observe [CpG, sample]. Source columns are
+        // strided, therefore copy only one bounded standard-layout chunk at a
+        // time instead of materializing a complete transposed assay.
+        let elements_per_chunk = (TARGET_ASSAY_CHUNK_BYTES / std::mem::size_of::<T>()).max(1);
+        let cpgs_per_chunk = elements_per_chunk.min(n_cpgs);
+        let dataset = group
+            .new_dataset::<T>()
+            .shape((n_samples, n_cpgs))
+            .chunk((1, cpgs_per_chunk))
             .deflate(6)
             .create(name)
             .context("Failed to create dataset")?;
 
+        for sample_idx in 0..n_samples {
+            for cpg_start in (0..n_cpgs).step_by(cpgs_per_chunk) {
+                let cpg_end = (cpg_start + cpgs_per_chunk).min(n_cpgs);
+                let chunk_values = (cpg_start..cpg_end)
+                    .map(|cpg_idx| data[(cpg_idx, sample_idx)])
+                    .collect::<Vec<_>>();
+                let chunk = Array2::from_shape_vec((1, cpg_end - cpg_start), chunk_values)
+                    .context("Failed to shape bounded assay chunk")?;
+                dataset
+                    .write_slice(
+                        chunk.view(),
+                        s![sample_idx..sample_idx + 1, cpg_start..cpg_end],
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Failed to write {} assay chunk for sample {} and CpGs {}..{}",
+                            name, sample_idx, cpg_start, cpg_end
+                        )
+                    })?;
+            }
+        }
+
         Ok(())
     }
 
-    fn write_rowdata(
-        &self,
-        group: &Group,
-        cpg_locations: &[crate::genome::cpg::CpGSite],
-    ) -> Result<()> {
+    fn write_rowdata(group: &Group, cpg_locations: &[crate::genome::cpg::CpGSite]) -> Result<()> {
         let sequence_names = cpg_locations
             .iter()
             .enumerate()
@@ -104,7 +129,18 @@ impl SummarizedExperimentWriter {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let start: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.start + 1).collect();
+        let start: Vec<u32> = cpg_locations
+            .iter()
+            .enumerate()
+            .map(|(row_index, cpg)| {
+                cpg.start.checked_add(1).with_context(|| {
+                    format!(
+                        "CpG start overflows 1-based coordinates at row {}",
+                        row_index
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let end: Vec<u32> = cpg_locations.iter().map(|cpg| cpg.end).collect();
         let strands = cpg_locations
             .iter()
@@ -143,8 +179,14 @@ impl SummarizedExperimentWriter {
         let width: Vec<u32> = start
             .iter()
             .zip(end.iter())
-            .map(|(start_position, end_position)| end_position - start_position + 1)
-            .collect();
+            .enumerate()
+            .map(|(row_index, (start_position, end_position))| {
+                end_position
+                    .checked_sub(*start_position)
+                    .and_then(|difference| difference.checked_add(1))
+                    .with_context(|| format!("Invalid CpG coordinates at row {}", row_index))
+            })
+            .collect::<Result<Vec<_>>>()?;
         group
             .new_dataset_builder()
             .with_data(&width)
@@ -160,7 +202,7 @@ impl SummarizedExperimentWriter {
         Ok(())
     }
 
-    fn write_coldata(&self, group: &Group, sample_names: &[String]) -> Result<()> {
+    fn write_coldata(group: &Group, sample_names: &[String]) -> Result<()> {
         let names = sample_names
             .iter()
             .enumerate()
@@ -189,16 +231,12 @@ impl SummarizedExperimentWriter {
         Ok(())
     }
 
-    fn write_metadata(&self, group: &Group, genome: &str) -> Result<()> {
-        let genome_string = VarLenUnicode::from_str(genome)
-            .context("Genome metadata contains an invalid string")?;
-        group
-            .new_dataset_builder()
-            .with_data(&genome_string)
-            .create("genome")
-            .context("Failed to create genome dataset")?;
+    fn write_metadata(group: &Group, genome: &str) -> Result<()> {
+        Self::write_string_metadata(group, "genome", genome)?;
+        Self::write_string_metadata(group, "schema_name", SCHEMA_NAME)?;
+        Self::write_string_metadata(group, "schema_version", SCHEMA_VERSION)?;
+        Self::write_string_metadata(group, "loader_compatibility", LOADER_COMPATIBILITY)?;
 
-        // is_h5
         group
             .new_dataset_builder()
             .with_data(&[true])
@@ -208,28 +246,24 @@ impl SummarizedExperimentWriter {
         Ok(())
     }
 
-    fn write_se_attributes(&self, file: &File) -> Result<()> {
-        let attr = file
-            .new_attr::<u32>()
-            .create("se_version")
-            .context("Failed to create se_version attribute")?;
-        attr.write_scalar(&2)?;
-
-        let delayed_array_type =
-            VarLenUnicode::from_str("HDF5Array").context("Failed to encode delayed array type")?;
-        let attr = file
-            .new_attr::<VarLenUnicode>()
-            .create("delayed_array_type")
-            .context("Failed to create delayed_array_type attribute")?;
-        attr.write_scalar(&delayed_array_type)?;
-
+    fn write_string_metadata(group: &Group, name: &str, value: &str) -> Result<()> {
+        let encoded_value = VarLenUnicode::from_str(value)
+            .with_context(|| format!("Metadata field {} contains an invalid string", name))?;
+        let dataset = group
+            .new_dataset::<VarLenUnicode>()
+            .shape(())
+            .create(name)
+            .with_context(|| format!("Failed to create {} metadata dataset", name))?;
+        dataset
+            .write_scalar(&encoded_value)
+            .with_context(|| format!("Failed to write {} metadata dataset", name))?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SummarizedExperimentWriter;
+    use super::{CustomHdf5Writer, LOADER_COMPATIBILITY, SCHEMA_NAME, SCHEMA_VERSION};
     use crate::cli::process::MethrixData;
     use crate::genome::cpg::CpGSite;
     use hdf5::types::VarLenUnicode;
@@ -237,7 +271,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn writes_schema_v2_with_u32_coverage_and_r_coordinates() {
+    fn writes_versioned_custom_schema_with_u32_coverage_and_r_coordinates() {
         let temporary_directory = tempdir().unwrap();
         let output_path = temporary_directory.path().join("assays.h5");
         let methrix_data = MethrixData {
@@ -261,21 +295,46 @@ mod tests {
             genome: "人类-hg38".to_string(),
         };
 
-        SummarizedExperimentWriter::new(output_path.to_string_lossy().into_owned())
+        CustomHdf5Writer::new(output_path.to_string_lossy().into_owned())
             .write_methrix_object(&methrix_data)
             .unwrap();
 
         let file = hdf5::File::open(&output_path).unwrap();
+        let metadata = file.group("metadata").unwrap();
         assert_eq!(
-            file.attr("se_version")
+            metadata
+                .dataset("schema_name")
                 .unwrap()
-                .read_scalar::<u32>()
-                .unwrap(),
-            2
+                .read_scalar::<VarLenUnicode>()
+                .unwrap()
+                .as_str(),
+            SCHEMA_NAME
         );
+        assert_eq!(
+            metadata
+                .dataset("schema_version")
+                .unwrap()
+                .read_scalar::<VarLenUnicode>()
+                .unwrap()
+                .as_str(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            metadata
+                .dataset("loader_compatibility")
+                .unwrap()
+                .read_scalar::<VarLenUnicode>()
+                .unwrap()
+                .as_str(),
+            LOADER_COMPATIBILITY
+        );
+        assert!(file.attr("se_version").is_err());
+        assert!(file.attr("delayed_array_type").is_err());
 
         let coverage_dataset = file.dataset("cov").unwrap();
         assert_eq!(coverage_dataset.shape(), vec![2, 2]);
+        assert_eq!(coverage_dataset.chunk(), Some(vec![1, 2]));
+        assert_eq!(file.dataset("beta").unwrap().chunk(), Some(vec![1, 2]));
         assert_eq!(
             coverage_dataset.read_raw::<u32>().unwrap(),
             vec![70_000, 3, 2, 4]

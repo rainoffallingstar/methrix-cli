@@ -1,4 +1,5 @@
 pub mod annotation;
+pub(crate) mod atomic_output;
 pub mod bismark;
 pub mod cli;
 pub mod genome;

@@ -1,5 +1,7 @@
 # HDF5 R兼容性验证报告
 
+> **历史报告，已被 2026-07-24 schema 契约取代。** 本文后续的 `assay001`/`assay002` 结构仅记录旧实现，不描述当前输出。当前产物使用 `methrix-cli.custom-hdf5/1.0.0` 的 `/beta`、`/cov`、`/rowData`、`/colData` 和 `/metadata`，仅承诺 `rhdf5` 直接访问；不承诺标准 HDF5Array 或 methrix loader 兼容。当前契约和验证命令见仓库 README。
+
 ## 验证时间
 2026-02-22
 

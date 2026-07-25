@@ -16,6 +16,10 @@ repository = "https://github.com/rainoffallingstar/methrix-cli"
 name = "methrix"
 path = "src/main.rs"
 
+[[test]]
+name = "integration"
+path = "tests/integration/mod.rs"
+
 [dependencies]
 # Error handling
 anyhow = "1.0"
@@ -26,6 +30,7 @@ flate2 = "1.0"
 # HDF5 (metno fork: maintained, supports static linking via CMake)
 hdf5 = { package = "hdf5-metno", version = "0.13", features = ["static", "zlib"] }
 hdf5-pure = { version = "0.1", optional = true }
+md-5 = { version = "0.11.0", optional = true }
 # File I/O
 memmap2 = "0.9"
 # Scientific computing (pinned to match hdf5-metno minimum ndarray version)
@@ -65,5 +70,5 @@ codegen-units = 1
 
 [features]
 default = []
-download = ["reqwest"]
+download = ["dep:reqwest", "dep:md-5"]
 hdf5-pure = ["dep:hdf5-pure"]
