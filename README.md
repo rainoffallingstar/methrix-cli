@@ -103,6 +103,8 @@ Options:
   -v, --verbose               Enable verbose logging
 ```
 
+When annotation is enabled, `methx` builds chromosome-local sorted interval buckets with prefix maximum end coordinates. CpG queries use a start-coordinate binary search before scanning only possible overlaps, and the Rayon processing pool is bounded by `--threads`. The annotation details are written to `CpG_annotation_details.tsv.gz`; the bounded summary is written to `CpG_annotation_report.xlsx`.
+
 #### `methx extract-cpgs`
 
 Extract CpG sites from reference genome.

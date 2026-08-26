@@ -54,6 +54,12 @@ Transactional publication
 | `src/annotation/mod.rs` | GTF annotation、qctb 汇总 workbook、gzip TSV 明细 |
 | `src/atomic_output.rs` | 同目录 staging、backup、rollback 与 stale-output removal |
 
+### Annotation query design
+
+Annotation is intentionally split into a resource-loading phase and a query phase. GTF records are normalized to canonical contig names, grouped into deterministic transcript models, and expanded into chromosome-local feature intervals. Each 64 KiB bucket is sorted by interval start and carries prefix maximum end bounds so a CpG query can reject impossible overlaps before evaluating feature priority and transcript distance. The query collection runs through a Rayon pool whose size is controlled by the pipeline `threads` setting.
+
+The current checked-in source implements the in-memory optimized query path. Persistent binary index serialization and the explicit `--annotation-index` runtime wiring used by the Gate 6 BS-PDX deployment are tracked separately in the Gate 6 report until their source revision is synchronized into this repository.
+
 ## 坐标契约
 
 - Bismark coverage 输入使用 1-based 单碱基坐标，要求 `end == start`。
