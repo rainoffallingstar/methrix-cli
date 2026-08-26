@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use ndarray::Array2;
+use rayon::prelude::*;
 use rust_xlsxwriter::Workbook;
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -59,12 +59,6 @@ struct Interval {
     end: u32,
 }
 
-impl Interval {
-    fn contains(&self, pos: u32) -> bool {
-        self.start <= pos && pos < self.end
-    }
-}
-
 #[derive(Debug, Clone)]
 struct RankedInterval {
     interval: Interval,
@@ -103,8 +97,139 @@ struct TranscriptBuilder {
 }
 
 #[derive(Debug, Clone)]
+struct FeatureInterval {
+    start: u32,
+    end: u32,
+    annotation: GenomicAnnotation,
+    rank_label: Option<String>,
+    tx_idx: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ChromosomeAnnotationIndex {
+    transcripts: Vec<TranscriptModel>,
+    tss_sorted: Vec<(u32, usize)>,
+    buckets: Vec<Vec<FeatureInterval>>,
+}
+
+#[derive(Debug, Clone)]
 struct GeneAnnotations {
-    transcripts_by_chr: HashMap<String, Vec<TranscriptModel>>,
+    indices_by_chr: HashMap<String, ChromosomeAnnotationIndex>,
+}
+
+impl GeneAnnotations {
+    fn from_transcripts(transcripts_by_chr: HashMap<String, Vec<TranscriptModel>>) -> Self {
+        let mut canonical_transcripts: HashMap<String, Vec<TranscriptModel>> = HashMap::new();
+        for (chr, txs) in transcripts_by_chr {
+            canonical_transcripts
+                .entry(canonical_contig_name(&chr))
+                .or_default()
+                .extend(txs);
+        }
+
+        let mut indices_by_chr = HashMap::new();
+        for (canon_chr, mut txs) in canonical_transcripts.clone() {
+            txs.sort_by(|a, b| {
+                a.tx_start
+                    .cmp(&b.tx_start)
+                    .then_with(|| a.tx_end.cmp(&b.tx_end))
+            });
+
+            let mut tss_sorted: Vec<(u32, usize)> = txs
+                .iter()
+                .enumerate()
+                .map(|(idx, tx)| (tx.tss, idx))
+                .collect();
+            tss_sorted.sort_by_key(|(tss, _)| *tss);
+
+            let mut max_coord = 0u32;
+            let mut intervals = Vec::new();
+            for (tx_idx, tx) in txs.iter().enumerate() {
+                intervals.push(FeatureInterval {
+                    start: tx.promoter.start,
+                    end: tx.promoter.end,
+                    annotation: GenomicAnnotation::Promoter,
+                    rank_label: None,
+                    tx_idx,
+                });
+                max_coord = max_coord.max(tx.promoter.end);
+
+                for u in &tx.utr5 {
+                    intervals.push(FeatureInterval {
+                        start: u.start,
+                        end: u.end,
+                        annotation: GenomicAnnotation::FivePrimeUtr,
+                        rank_label: None,
+                        tx_idx,
+                    });
+                    max_coord = max_coord.max(u.end);
+                }
+                for u in &tx.utr3 {
+                    intervals.push(FeatureInterval {
+                        start: u.start,
+                        end: u.end,
+                        annotation: GenomicAnnotation::ThreePrimeUtr,
+                        rank_label: None,
+                        tx_idx,
+                    });
+                    max_coord = max_coord.max(u.end);
+                }
+                for e in &tx.exons {
+                    intervals.push(FeatureInterval {
+                        start: e.interval.start,
+                        end: e.interval.end,
+                        annotation: GenomicAnnotation::Exon,
+                        rank_label: Some(e.rank_label.clone()),
+                        tx_idx,
+                    });
+                    max_coord = max_coord.max(e.interval.end);
+                }
+                for i in &tx.introns {
+                    intervals.push(FeatureInterval {
+                        start: i.interval.start,
+                        end: i.interval.end,
+                        annotation: GenomicAnnotation::Intron,
+                        rank_label: Some(i.rank_label.clone()),
+                        tx_idx,
+                    });
+                    max_coord = max_coord.max(i.interval.end);
+                }
+                intervals.push(FeatureInterval {
+                    start: tx.downstream.start,
+                    end: tx.downstream.end,
+                    annotation: GenomicAnnotation::Downstream,
+                    rank_label: None,
+                    tx_idx,
+                });
+                max_coord = max_coord.max(tx.downstream.end);
+            }
+
+            let num_buckets = ((max_coord >> 16) as usize) + 2;
+            let mut buckets = vec![Vec::new(); num_buckets];
+            for interval in intervals {
+                let start_bucket = (interval.start >> 16) as usize;
+                let end_bucket = if interval.end > 0 {
+                    ((interval.end - 1) >> 16) as usize
+                } else {
+                    start_bucket
+                };
+                for b in start_bucket..=end_bucket.min(num_buckets - 1) {
+                    buckets[b].push(interval.clone());
+                }
+            }
+
+            indices_by_chr.insert(
+                canon_chr,
+                ChromosomeAnnotationIndex {
+                    transcripts: txs,
+                    tss_sorted,
+                    buckets,
+                },
+            );
+        }
+
+        Self { indices_by_chr }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -278,23 +403,24 @@ pub fn annotate_cpgs(
 ) -> Result<AnnotationResult> {
     let resources = load_annotation_resources(genome, annotation_dir)?;
 
-    let mut records = Vec::with_capacity(cpg_sites.len());
-    for cpg in cpg_sites {
-        let chip = annotate_genomic_feature(&resources.genes, &cpg.chr, cpg.start);
-
-        records.push(AnnotationRecord {
-            chr: cpg.chr.clone(),
-            start_1based: cpg.start + 1,
-            end_1based: cpg.end,
-            strand: cpg.strand,
-            annotation: chip.annotation.as_str().to_string(),
-            gene_id: chip.gene_id,
-            gene_symbol: chip.gene_symbol,
-            transcript_id: chip.transcript_id,
-            distance_to_tss: chip.distance_to_tss,
-            exon_intron_rank: chip.exon_intron_rank,
-        });
-    }
+    let records: Vec<AnnotationRecord> = cpg_sites
+        .par_iter()
+        .map(|cpg| {
+            let chip = annotate_genomic_feature(&resources.genes, &cpg.chr, cpg.start);
+            AnnotationRecord {
+                chr: cpg.chr.clone(),
+                start_1based: cpg.start + 1,
+                end_1based: cpg.end,
+                strand: cpg.strand,
+                annotation: chip.annotation.as_str().to_string(),
+                gene_id: chip.gene_id,
+                gene_symbol: chip.gene_symbol,
+                transcript_id: chip.transcript_id,
+                distance_to_tss: chip.distance_to_tss,
+                exon_intron_rank: chip.exon_intron_rank,
+            }
+        })
+        .collect();
 
     let sample_summary = calculate_sample_annotation_summary(&records, cov_matrix, sample_names)?;
 
@@ -590,15 +716,7 @@ fn load_genes_from_gtf(path: &Path) -> Result<GeneAnnotations> {
             .push(model);
     }
 
-    for txs in transcripts_by_chr.values_mut() {
-        txs.sort_by(|a, b| {
-            a.tx_start
-                .cmp(&b.tx_start)
-                .then_with(|| a.tx_end.cmp(&b.tx_end))
-        });
-    }
-
-    Ok(GeneAnnotations { transcripts_by_chr })
+    Ok(GeneAnnotations::from_transcripts(transcripts_by_chr))
 }
 
 fn build_ranked_intervals(
@@ -676,7 +794,7 @@ struct FeatureHit {
 
 fn annotate_genomic_feature(genes: &GeneAnnotations, chr: &str, pos: u32) -> FeatureHit {
     let canonical_chr = canonical_contig_name(chr);
-    let Some(transcripts) = genes.transcripts_by_chr.get(&canonical_chr) else {
+    let Some(index) = genes.indices_by_chr.get(&canonical_chr) else {
         return FeatureHit {
             annotation: GenomicAnnotation::Intergenic,
             gene_id: "".to_string(),
@@ -687,122 +805,93 @@ fn annotate_genomic_feature(genes: &GeneAnnotations, chr: &str, pos: u32) -> Fea
         };
     };
 
-    let mut best_hit: Option<FeatureHit> = None;
-    let mut nearest_intergenic: Option<FeatureHit> = None;
+    let mut best_hit_ann: Option<GenomicAnnotation> = None;
+    let mut best_hit_dist: i32 = 0;
+    let mut best_hit_rank: Option<&str> = None;
+    let mut best_hit_idx: Option<usize> = None;
 
-    for tx in transcripts {
-        let distance_to_tss = signed_distance_to_tss(pos, tx.tss, tx.strand);
-        let abs_dist = distance_to_tss.unsigned_abs();
+    let bucket_idx = (pos >> 16) as usize;
+    if let Some(bucket) = index.buckets.get(bucket_idx) {
+        for item in bucket {
+            if item.start <= pos && pos < item.end {
+                let tx = &index.transcripts[item.tx_idx];
+                let distance_to_tss = signed_distance_to_tss(pos, tx.tss, tx.strand);
+                let abs_dist = distance_to_tss.unsigned_abs();
 
-        let update_nearest = |current: &mut Option<FeatureHit>| {
-            let candidate = FeatureHit {
-                annotation: GenomicAnnotation::Intergenic,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: "".to_string(),
-            };
+                let replace = match best_hit_ann {
+                    Some(existing_ann) => {
+                        let p_cand = item.annotation.priority();
+                        let p_exist = existing_ann.priority();
+                        if p_cand < p_exist {
+                            true
+                        } else if p_cand == p_exist {
+                            abs_dist < best_hit_dist.unsigned_abs()
+                        } else {
+                            false
+                        }
+                    }
+                    None => true,
+                };
 
-            let should_replace = match current {
-                Some(existing) => abs_dist < existing.distance_to_tss.unsigned_abs(),
-                None => true,
-            };
-            if should_replace {
-                *current = Some(candidate);
-            }
-        };
-        update_nearest(&mut nearest_intergenic);
-
-        let hit = if tx.promoter.contains(pos) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::Promoter,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: "".to_string(),
-            })
-        } else if tx.utr5.iter().any(|i| i.contains(pos)) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::FivePrimeUtr,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: "".to_string(),
-            })
-        } else if tx.utr3.iter().any(|i| i.contains(pos)) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::ThreePrimeUtr,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: "".to_string(),
-            })
-        } else if let Some(exon_hit) = tx.exons.iter().find(|e| e.interval.contains(pos)) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::Exon,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: exon_hit.rank_label.clone(),
-            })
-        } else if let Some(intron_hit) = tx.introns.iter().find(|i| i.interval.contains(pos)) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::Intron,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: intron_hit.rank_label.clone(),
-            })
-        } else if tx.downstream.contains(pos) {
-            Some(FeatureHit {
-                annotation: GenomicAnnotation::Downstream,
-                gene_id: tx.gene_id.clone(),
-                gene_symbol: tx.gene_symbol.clone(),
-                transcript_id: tx.transcript_id.clone(),
-                distance_to_tss,
-                exon_intron_rank: "".to_string(),
-            })
-        } else {
-            None
-        };
-
-        if let Some(candidate) = hit {
-            let replace = match &best_hit {
-                Some(existing) => compare_hits(&candidate, existing) == Ordering::Less,
-                None => true,
-            };
-
-            if replace {
-                best_hit = Some(candidate);
+                if replace {
+                    best_hit_ann = Some(item.annotation);
+                    best_hit_dist = distance_to_tss;
+                    best_hit_rank = item.rank_label.as_deref();
+                    best_hit_idx = Some(item.tx_idx);
+                }
             }
         }
     }
 
-    best_hit.or(nearest_intergenic).unwrap_or(FeatureHit {
-        annotation: GenomicAnnotation::Intergenic,
-        gene_id: "".to_string(),
-        gene_symbol: "".to_string(),
-        transcript_id: "".to_string(),
-        distance_to_tss: i32::MAX,
-        exon_intron_rank: "".to_string(),
-    })
-}
+    if let (Some(ann), Some(idx)) = (best_hit_ann, best_hit_idx) {
+        let tx = &index.transcripts[idx];
+        FeatureHit {
+            annotation: ann,
+            gene_id: tx.gene_id.clone(),
+            gene_symbol: tx.gene_symbol.clone(),
+            transcript_id: tx.transcript_id.clone(),
+            distance_to_tss: best_hit_dist,
+            exon_intron_rank: best_hit_rank.unwrap_or_default().to_string(),
+        }
+    } else if !index.tss_sorted.is_empty() {
+        let pivot = index.tss_sorted.partition_point(|(tss, _)| *tss < pos);
+        let mut min_abs = u32::MAX;
+        let mut chosen_idx = 0;
+        let mut chosen_dist = i32::MAX;
 
-fn compare_hits(a: &FeatureHit, b: &FeatureHit) -> Ordering {
-    a.annotation
-        .priority()
-        .cmp(&b.annotation.priority())
-        .then_with(|| {
-            a.distance_to_tss
-                .unsigned_abs()
-                .cmp(&b.distance_to_tss.unsigned_abs())
-        })
+        let start_range = pivot.saturating_sub(1);
+        let end_range = (pivot + 2).min(index.tss_sorted.len());
+        for i in start_range..end_range {
+            let (_, tx_idx) = index.tss_sorted[i];
+            let tx = &index.transcripts[tx_idx];
+            let dist = signed_distance_to_tss(pos, tx.tss, tx.strand);
+            let abs_d = dist.unsigned_abs();
+            if abs_d < min_abs {
+                min_abs = abs_d;
+                chosen_idx = tx_idx;
+                chosen_dist = dist;
+            }
+        }
+
+        let tx = &index.transcripts[chosen_idx];
+        FeatureHit {
+            annotation: GenomicAnnotation::Intergenic,
+            gene_id: tx.gene_id.clone(),
+            gene_symbol: tx.gene_symbol.clone(),
+            transcript_id: tx.transcript_id.clone(),
+            distance_to_tss: chosen_dist,
+            exon_intron_rank: "".to_string(),
+        }
+    } else {
+        FeatureHit {
+            annotation: GenomicAnnotation::Intergenic,
+            gene_id: "".to_string(),
+            gene_symbol: "".to_string(),
+            transcript_id: "".to_string(),
+            distance_to_tss: i32::MAX,
+            exon_intron_rank: "".to_string(),
+        }
+    }
 }
 
 fn signed_distance_to_tss(pos: u32, tss: u32, strand: char) -> i32 {
@@ -969,9 +1058,7 @@ mod tests {
             utr3: vec![],
         };
 
-        let genes = GeneAnnotations {
-            transcripts_by_chr: HashMap::from([("1".to_string(), vec![tx])]),
-        };
+        let genes = GeneAnnotations::from_transcripts(HashMap::from([("1".to_string(), vec![tx])]));
 
         let hit = annotate_genomic_feature(&genes, "chr1", 1200);
         assert_eq!(hit.annotation, GenomicAnnotation::Promoter);
@@ -998,9 +1085,7 @@ mod tests {
             utr3: vec![],
         };
 
-        let genes = GeneAnnotations {
-            transcripts_by_chr: HashMap::from([("2".to_string(), vec![tx])]),
-        };
+        let genes = GeneAnnotations::from_transcripts(HashMap::from([("2".to_string(), vec![tx])]));
 
         let hit = annotate_genomic_feature(&genes, "chr2", 1000);
         assert_eq!(hit.annotation, GenomicAnnotation::Intergenic);
@@ -1057,9 +1142,8 @@ mod tests {
                 end: 250,
             }],
         };
-        let genes = GeneAnnotations {
-            transcripts_by_chr: HashMap::from([("1".to_string(), vec![transcript])]),
-        };
+        let genes =
+            GeneAnnotations::from_transcripts(HashMap::from([("1".to_string(), vec![transcript])]));
 
         let expected_annotations = [
             (100, GenomicAnnotation::Promoter, ""),

@@ -187,7 +187,7 @@ Excel file with coverage statistics:
 - `CpG_annotation_report.xlsx`: bounded `ChIPseeker_By_Sample` summary data. The required qctb categories `Promoter`, `Exon`, `Intron`, and `Intergenic` are always present, including zero-count columns; additional categories follow in lexical order.
 - `CpG_annotation_details.tsv.gz`: unbounded per-CpG GTF annotation details with chromosome, 1-based closed coordinates, strand, annotation, gene, transcript, TSS distance, and exon/intron rank.
 
-The details table is intentionally not stored in Excel, so WGBS-sized datasets are not constrained by Excel's 1,048,576-row worksheet limit. `--skip-annotation` transactionally removes stale copies of both annotation outputs.
+The annotation query path builds chromosome-local sorted interval buckets with prefix maximum end coordinates, then uses a start-coordinate binary search to avoid scanning intervals that cannot overlap the queried CpG. Queries are evaluated in parallel with Rayon, and the `--threads` value bounds the processing pool. The details table is intentionally not stored in Excel, so WGBS-sized datasets are not constrained by Excel's 1,048,576-row worksheet limit. `--skip-annotation` transactionally removes stale copies of both annotation outputs.
 
 ## R direct-schema integration
 

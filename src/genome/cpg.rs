@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use needletail::parse_fastx_file;
+use flate2::read::MultiGzDecoder;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::Path,
 };
 
@@ -49,6 +49,14 @@ pub struct CpGData {
     pub release_name: String,
 }
 
+#[derive(Debug)]
+struct CurrentContigExtraction {
+    name: String,
+    is_included: bool,
+    sequence_length: usize,
+    previous_base: Option<u8>,
+}
+
 pub struct CpGExtractor {
     fasta_path: String,
     contigs: Option<Vec<String>>,
@@ -69,49 +77,77 @@ impl CpGExtractor {
 
     /// Extract CpG sites - ported from R::extract_CPGs
     pub fn extract(&self) -> Result<CpGData> {
-        let mut reader = parse_fastx_file(&self.fasta_path).context("Failed to open FASTA file")?;
+        let reader = self.open_fasta_reader()?;
+        self.extract_from_reader(reader)
+    }
 
+    fn open_fasta_reader(&self) -> Result<BufReader<Box<dyn Read>>> {
+        let fasta_file = File::open(&self.fasta_path).context("Failed to open FASTA file")?;
+        let reader: Box<dyn Read> = if self.fasta_path.ends_with(".gz") {
+            Box::new(MultiGzDecoder::new(fasta_file))
+        } else {
+            Box::new(fasta_file)
+        };
+
+        Ok(BufReader::new(reader))
+    }
+
+    fn extract_from_reader<R: BufRead>(&self, mut reader: R) -> Result<CpGData> {
         let mut all_cpgs = Vec::new();
         let mut contig_info = Vec::new();
-        let mut total_cpgs = 0;
+        let mut current_contig = None;
+        let mut header_line = Vec::new();
 
-        // Read each chromosome
-        while let Some(record_result) = reader.next() {
-            let record = record_result
-                .map_err(|e| anyhow::anyhow!("Failed to read FASTA record: {}", e))
-                .context("Failed to read FASTA record")?;
-            let chr = std::str::from_utf8(record.id())
-                .context("Invalid UTF-8 in sequence ID")?
-                .to_string();
-            let seq = record.seq();
-
-            // Check if we should include this contig
-            if !self.should_include_chr(&chr) {
-                continue;
+        loop {
+            header_line.clear();
+            let header_bytes_read = reader
+                .read_until(b'\n', &mut header_line)
+                .context("Failed to read FASTA header")?;
+            if header_bytes_read == 0 {
+                break;
             }
 
-            // Record contig info
-            let contig_length = u32::try_from(seq.len()).with_context(|| {
-                format!(
-                    "FASTA contig {} has {} bases, exceeding the u32 coordinate limit",
-                    chr,
-                    seq.len()
-                )
-            })?;
-            contig_info.push(ContigInfo {
-                contig: chr.clone(),
-                length: contig_length,
+            let header = header_line
+                .strip_suffix(b"\n")
+                .unwrap_or(&header_line)
+                .strip_suffix(b"\r")
+                .unwrap_or_else(|| header_line.strip_suffix(b"\n").unwrap_or(&header_line));
+            if !header.starts_with(b">") {
+                anyhow::bail!(
+                    "Expected FASTA header beginning with '>', found sequence data before a header"
+                );
+            }
+
+            self.finalize_contig(&mut current_contig, &mut contig_info)?;
+            let contig_name = Self::parse_contig_name(header)?;
+            current_contig = Some(CurrentContigExtraction {
+                is_included: self.should_include_chr(&contig_name),
+                name: contig_name,
+                sequence_length: 0,
+                previous_base: None,
             });
 
-            // Extract CpG sites - equivalent to Biostrings::matchPattern("CG", sequence)
-            let cpgs = self.extract_cpgs_from_sequence(&chr, &seq);
-            total_cpgs += cpgs.len();
-            all_cpgs.extend(cpgs);
+            loop {
+                let buffer = reader.fill_buf().context("Failed to read FASTA sequence")?;
+                if buffer.is_empty() || buffer[0] == b'>' {
+                    break;
+                }
+
+                let bytes_to_consume = Self::consume_sequence_chunk(
+                    buffer,
+                    current_contig
+                        .as_mut()
+                        .expect("current contig is initialized"),
+                    &mut all_cpgs,
+                )?;
+                reader.consume(bytes_to_consume);
+            }
         }
 
+        self.finalize_contig(&mut current_contig, &mut contig_info)?;
         println!(
             "-Done. Extracted {} CpGs from {} contigs.",
-            total_cpgs.separated_string(),
+            all_cpgs.len().separated_string(),
             contig_info.len()
         );
 
@@ -120,6 +156,79 @@ impl CpGExtractor {
             contig_lens: contig_info,
             release_name: self.extract_genome_name()?,
         })
+    }
+
+    fn parse_contig_name(header: &[u8]) -> Result<String> {
+        let contig_name = header[1..]
+            .split(|byte| byte.is_ascii_whitespace())
+            .next()
+            .filter(|identifier| !identifier.is_empty())
+            .context("FASTA header does not contain a contig identifier")?;
+
+        std::str::from_utf8(contig_name)
+            .context("FASTA contig identifier is not valid UTF-8")
+            .map(str::to_owned)
+    }
+
+    fn consume_sequence_chunk(
+        buffer: &[u8],
+        current_contig: &mut CurrentContigExtraction,
+        all_cpgs: &mut Vec<CpGSite>,
+    ) -> Result<usize> {
+        let bytes_to_consume = buffer
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(buffer.len(), |newline_index| newline_index + 1);
+
+        if !current_contig.is_included {
+            return Ok(bytes_to_consume);
+        }
+
+        for base in &buffer[..bytes_to_consume] {
+            if base.is_ascii_whitespace() {
+                continue;
+            }
+
+            let position = u32::try_from(current_contig.sequence_length).with_context(|| {
+                format!(
+                    "FASTA contig {} exceeds the u32 coordinate limit",
+                    current_contig.name
+                )
+            })?;
+            let normalized_base = base.to_ascii_uppercase();
+            if current_contig.previous_base == Some(b'C') && normalized_base == b'G' {
+                all_cpgs.push(CpGSite {
+                    chr: current_contig.name.clone(),
+                    start: position - 1,
+                    end: position + 1,
+                    strand: '+',
+                });
+            }
+            current_contig.previous_base = Some(normalized_base);
+            current_contig.sequence_length += 1;
+        }
+
+        Ok(bytes_to_consume)
+    }
+
+    fn finalize_contig(
+        &self,
+        current_contig: &mut Option<CurrentContigExtraction>,
+        contig_info: &mut Vec<ContigInfo>,
+    ) -> Result<()> {
+        let Some(contig) = current_contig.take() else {
+            return Ok(());
+        };
+        if !contig.is_included {
+            return Ok(());
+        }
+
+        contig_info.push(ContigInfo {
+            contig: contig.name,
+            length: u32::try_from(contig.sequence_length)
+                .context("FASTA contig exceeds the u32 coordinate limit")?,
+        });
+        Ok(())
     }
 
     fn should_include_chr(&self, chr: &str) -> bool {
@@ -166,31 +275,6 @@ impl CpGExtractor {
                 | "M"
                 | "MT"
         )
-    }
-
-    /// Extract CpGs from sequence - equivalent to Biostrings::matchPattern("CG", ...)
-    fn extract_cpgs_from_sequence(&self, chr: &str, seq: &[u8]) -> Vec<CpGSite> {
-        let mut cpgs = Vec::new();
-        let bytes = seq;
-
-        // Find all CG patterns (positive strand)
-        let mut i = 0;
-        while i < bytes.len().saturating_sub(1) {
-            // CpG is defined as C followed by G (on positive strand)
-            let current_base = bytes[i].to_ascii_uppercase();
-            let next_base = bytes[i + 1].to_ascii_uppercase();
-            if current_base == b'C' && next_base == b'G' {
-                cpgs.push(CpGSite {
-                    chr: chr.to_string(),
-                    start: i as u32, // 0-based, internal use
-                    end: (i + 2) as u32,
-                    strand: '+',
-                });
-            }
-            i += 1;
-        }
-
-        cpgs
     }
 
     fn extract_genome_name(&self) -> Result<String> {
@@ -280,14 +364,37 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_cpgs_from_sequence() {
+    fn test_extract_cpgs_from_unwrapped_fasta_records() {
         let extractor = CpGExtractor::new("test.fa".to_string());
-        let seq = b"ATcgATCGAA";
-        let cpgs = extractor.extract_cpgs_from_sequence("chr1", seq);
+        let fasta = b">chr1 source\nACCG\n>chrUn\nCG\n>chr2\nCGCG";
 
-        // Should find 2 CG sites
-        assert_eq!(cpgs.len(), 2);
-        assert_eq!(cpgs[0].start, 2); // First CG at position 2
-        assert_eq!(cpgs[1].start, 6); // Second CG at position 6
+        let cpg_data = extractor
+            .extract_from_reader(BufReader::with_capacity(3, &fasta[..]))
+            .expect("extract CpGs from unwrapped FASTA");
+
+        assert_eq!(cpg_data.contig_lens.len(), 2);
+        assert_eq!(cpg_data.contig_lens[0].contig, "chr1");
+        assert_eq!(cpg_data.contig_lens[0].length, 4);
+        assert_eq!(cpg_data.contig_lens[1].contig, "chr2");
+        assert_eq!(cpg_data.contig_lens[1].length, 4);
+        assert_eq!(cpg_data.cpgs.len(), 3);
+        assert_eq!(cpg_data.cpgs[0].chr, "chr1");
+        assert_eq!(cpg_data.cpgs[0].start, 2);
+        assert_eq!(cpg_data.cpgs[1].chr, "chr2");
+        assert_eq!(cpg_data.cpgs[1].start, 0);
+        assert_eq!(cpg_data.cpgs[2].start, 2);
+    }
+
+    #[test]
+    fn test_extract_cpgs_spans_buffer_chunks() {
+        let extractor = CpGExtractor::new("test.fa".to_string());
+        let fasta = b">chr1\nAACG";
+
+        let cpg_data = extractor
+            .extract_from_reader(BufReader::with_capacity(3, &fasta[..]))
+            .expect("extract CpGs across a buffer boundary");
+
+        assert_eq!(cpg_data.cpgs.len(), 1);
+        assert_eq!(cpg_data.cpgs[0].start, 2);
     }
 }
