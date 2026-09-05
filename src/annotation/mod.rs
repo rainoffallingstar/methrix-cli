@@ -213,8 +213,9 @@ impl GeneAnnotations {
                 } else {
                     start_bucket
                 };
-                for b in start_bucket..=end_bucket.min(num_buckets - 1) {
-                    buckets[b].push(interval.clone());
+                let last_bucket = end_bucket.min(num_buckets - 1);
+                for bucket in buckets.iter_mut().take(last_bucket + 1).skip(start_bucket) {
+                    bucket.push(interval.clone());
                 }
             }
 
