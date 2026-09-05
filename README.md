@@ -1,277 +1,134 @@
 # methx
 
-High-performance methylation data processor - Bismark to HDF5 conversion tool.
+**A Rust methylation processor that converts Bismark coverage into versioned HDF5 and QC outputs.**
 
-> **Note**: This project is based on the [R methrix package](https://github.com/CompEpigen/methrix).
+`methx` extracts CpG coordinates from reference FASTA files, processes Bismark coverage files with bounded parallelism, writes a documented custom HDF5 schema, and generates coverage and annotation reports. An included R function converts that custom file into a native Methrix HDF5 directory when standard Methrix loading is required.
 
-## Features
+## What it does
 
-- **Fast CpG extraction** from reference genome FASTA files
-- **Efficient Bismark file processing** with parallel support
-- **Versioned custom HDF5 output** for direct access with R's `rhdf5`
-- **Quality control reports** in Excel format
-- **Cross-platform** standalone binary
+- Extracts CpG universes from FASTA or pinned built-in genome names.
+- Processes `.bismark.cov.gz` inputs into beta and coverage assays.
+- Writes transactional HDF5, QC workbook, and optional GTF annotation outputs.
+- Supports `hg19`, `hg38`, `mm10`, and `mm39` genome downloads behind the `download` feature.
+- Provides direct `rhdf5` access and an explicit custom-HDF5 → native Methrix conversion path.
 
-## Installation
+## Install
 
-### Build from source
+`methx` uses HDF5. A release binary is the easiest path; build from source when developing:
 
 ```bash
-# Clone the repository
 git clone https://github.com/rainoffallingstar/methx.git
 cd methx
-
-# Build release version
 cargo build --release
-
-# The binary will be at: target/release/methx
+./target/release/methx --help
 ```
 
-### Requirements
+For local HDF5 development, set the environment variables required by your platform or use the repository's `rust_build` environment. See [HDF5 dependency notes](docs/HDF5_DEPENDENCY.md).
 
-- Rust 1.75 or later
-- HDF5 libraries (see below)
+## Quick start
 
-#### Installing HDF5
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install libhdf5-dev
-```
-
-**macOS:**
-```bash
-brew install hdf5
-```
-
-**Windows:**
-- Install HDF5 from https://www.hdfgroup.org/downloads/index.html
-- Set HDF5_DIR environment variable
-
-## Usage
-
-### Basic workflow
+Extract a CpG universe once:
 
 ```bash
-# 1. Extract CpG sites from reference genome (optional one-time step)
 methx extract-cpgs \
-  --genome hg19.fa \
-  --output hg19_cpgs.ron
+  --genome hg38.fa \
+  --output hg38_cpgs.ron
+```
 
-# 2. Process Bismark output files
+Process Bismark coverage:
+
+```bash
 methx process \
-  --input bismark_output/ \
-  --output results/ \
-  --genome hg19_cpgs.ron \
+  --input bismark_output \
+  --output results \
+  --genome hg38_cpgs.ron \
   --threads 8
+```
 
-# 3. Generate QC report (can be run separately)
+Generate a coverage-only report from an existing output:
+
+```bash
 methx qc-report \
-  --input results/ \
-  --output qc_report.xlsx
+  --input results \
+  --output results/qc_report.xlsx
 ```
 
-### Download reference genomes
-
-The download command requires `--features download`. Built-in releases (`hg19`, `hg38`, `mm10`, and `mm39`) are pinned to UCSC HTTPS URLs and official compressed-source MD5 values. Downloads are streamed with timeout and size limits, verified before publication, and atomically installed as `<release>.fa` together with `<release>.fa.provenance.ron`. Cached FASTA files are reused only after their provenance, byte size, and FASTA MD5 are revalidated.
+Download a pinned built-in genome when the optional feature is enabled:
 
 ```bash
-# Download built-in genome (hg19, hg38, mm10, mm39)
-methx download-genome \
-  --genome hg19 \
-  --output genomes/
+cargo build --release --features download
+methx download-genome --genome hg38 --output genomes
 ```
 
-### Commands
+## Main commands
 
-#### `methx process`
+| Command | Purpose |
+| --- | --- |
+| `extract-cpgs` | Build a RON CpG coordinate file from FASTA or a built-in genome. |
+| `process` | Convert Bismark coverage into HDF5, QC, and optional annotation outputs. |
+| `qc-report` | Regenerate a coverage-only Excel or report output. |
+| `download-genome` | Stream, verify, and atomically install a built-in genome release. |
 
-Process Bismark output files into methrix format.
+Important `process` options include `--min-coverage`, `--remove-uncovered`, `--annotation-dir`, `--skip-annotation`, and `--threads`.
 
-```bash
-methx process [OPTIONS]
+## HDF5 contract
 
-Options:
-  -i, --input <DIR>           Input directory with .bismark.cov.gz files
-  -o, --output <DIR>          Output directory for H5 files
-  -g, --genome <GENOME>       Reference genome (FASTA or pre-extracted .ron)
-  -t, --threads <N>           Number of threads [default: CPU count]
-      --min-coverage <N>       Minimum coverage [default: 1]
-      --remove-uncovered      Remove uncovered loci [default: true]
-      --annotation-dir <DIR>  Annotation resources directory (e.g. hg19.gtf or hg19.gtf.gz)
-      --skip-annotation       Skip CpG annotation report generation
-  -v, --verbose               Enable verbose logging
+The primary custom output is `assays.h5` (with `methrix_data.h5` as an identical filename alias):
+
+```text
+assays.h5
+├── beta
+├── cov
+├── rowData/{chr,seqnames,start,end,width,strand}
+├── colData/{sample_id,sample_name}
+└── metadata/{genome,is_h5,schema_name,schema_version,loader_compatibility}
 ```
 
-When annotation is enabled, `methx` builds chromosome-local sorted interval buckets with prefix maximum end coordinates. CpG queries use a start-coordinate binary search before scanning only possible overlaps, and the Rayon processing pool is bounded by `--threads`. The annotation details are written to `CpG_annotation_details.tsv.gz`; the bounded summary is written to `CpG_annotation_report.xlsx`.
+Coordinates are 1-based closed intervals. The custom file is directly readable with `rhdf5`, but it is **not** itself a native `methrix::load_HDF5_methrix()` directory.
 
-#### `methx extract-cpgs`
+## Native Methrix interoperability
 
-Extract CpG sites from reference genome.
-
-```bash
-methx extract-cpgs [OPTIONS]
-
-Options:
-  -g, --genome <GENOME>       Genome FASTA file or built-in name
-  -o, --output <FILE>         Output RON file for CpG data
-      --contigs <CONTIGS>     Contigs to include [default: autosomes + sex chromosomes]
-  -v, --verbose               Enable verbose logging
-```
-
-#### `methx download-genome`
-
-Download reference genome from UCSC.
-
-```bash
-methx download-genome [OPTIONS]
-
-Options:
-  -g, --genome <GENOME>       Genome name (hg19, hg38, mm10, mm39)
-  -o, --output <DIR>          Output directory
-  -v, --verbose               Enable verbose logging
-```
-
-#### `methx qc-report`
-
-Regenerate a coverage-only QC report from an existing methrix H5 object.
-
-```bash
-methx qc-report [OPTIONS]
-
-Options:
-  -i, --input <DIR>           Input directory with methrix H5 object
-  -o, --output <FILE>         Output Excel file
-  -v, --verbose               Enable verbose logging
-```
-
-## Output files
-
-### HDF5 file structure
-
-The generated H5 file uses the versioned `methx.custom-hdf5` schema. It is designed for direct dataset access with R's `rhdf5`; it is **not** a standard `saveHDF5SummarizedExperiment()` directory and is not currently loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`.
-
-`assays.h5` is the primary file. `methrix_data.h5` is an identical filename alias, not a different compatibility format:
-
-```
-methrix_data.h5
-├── beta              # Methylation matrix (f32)
-├── cov               # Coverage matrix (u32)
-├── rowData/
-│   ├── chr           # Chromosome
-│   ├── seqnames      # Chromosome alias for direct R access
-│   ├── start         # Start position (1-based, closed)
-│   ├── end           # End position (1-based, closed)
-│   ├── width         # Closed interval width
-│   └── strand        # Strand (+/-/*)
-├── colData/
-│   ├── sample_id     # Sample names
-│   └── sample_name   # Sample name alias
-└── metadata/
-    ├── genome                # Reference genome name
-    ├── is_h5                 # HDF5 format flag
-    ├── schema_name           # methx.custom-hdf5
-    ├── schema_version        # Current schema version
-    └── loader_compatibility  # Explicit supported/unsupported loader contract
-```
-
-### QC report
-
-Excel file with coverage statistics:
-- Total CpGs
-- Covered CpGs
-- Coverage distribution (1X, 2X, 3X, 4X, 5X, 10X)
-
-### CpG annotation report
-
-`methx process` publishes the annotation outputs as one transaction with HDF5 and QC outputs:
-
-- `CpG_annotation_report.xlsx`: bounded `ChIPseeker_By_Sample` summary data. The required qctb categories `Promoter`, `Exon`, `Intron`, and `Intergenic` are always present, including zero-count columns; additional categories follow in lexical order.
-- `CpG_annotation_details.tsv.gz`: unbounded per-CpG GTF annotation details with chromosome, 1-based closed coordinates, strand, annotation, gene, transcript, TSS distance, and exon/intron rank.
-
-The annotation query path builds chromosome-local sorted interval buckets with prefix maximum end coordinates, then uses a start-coordinate binary search to avoid scanning intervals that cannot overlap the queried CpG. Queries are evaluated in parallel with Rayon, and the `--threads` value bounds the processing pool. The details table is intentionally not stored in Excel, so WGBS-sized datasets are not constrained by Excel's 1,048,576-row worksheet limit. `--skip-annotation` transactionally removes stale copies of both annotation outputs.
-
-## R direct-schema integration
-
-The generated H5 files can be read directly with `rhdf5`. The following example manually constructs a `SummarizedExperiment` in memory; this does not claim that the file itself satisfies the standard HDF5Array loader contract:
-
-```r
-library(rhdf5)
-
-# Read data using new dataset names (beta/cov)
-h5_file <- "results/assays.h5"
-beta <- h5read(h5_file, "/beta")
-cov <- h5read(h5_file, "/cov")
-
-# Read coordinates
-chr <- h5read(h5_file, "/rowData/chr")
-start <- h5read(h5_file, "/rowData/start")
-end <- h5read(h5_file, "/rowData/end")
-strand <- h5read(h5_file, "/rowData/strand")
-
-# Create SummarizedExperiment object
-library(SummarizedExperiment)
-library(GenomicRanges)
-
-gr <- GRanges(chr, IRanges(start, end), strand)
-coldata <- DataFrame(sample_id = h5read(h5_file, "/colData/sample_id"))
-
-se <- SummarizedExperiment(
-  assays = list(beta = beta, cov = cov),
-  rowRanges = gr,
-  colData = coldata
-)
-
-# Use with most Bioconductor functions
-assay(se, "beta")
-assay(se, "cov")
-```
-
-**Loader status**: the custom schema is intentionally not itself loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`. To create a native Methrix HDF5SummarizedExperiment directory, source the standalone exporter shipped at `scripts/export_methrix_hdf5.R`:
+Source the standalone exporter:
 
 ```r
 source("scripts/export_methrix_hdf5.R")
 
 export_methx_h5_to_methrix(
   methx_h5_path = "results/assays.h5",
-  output_directory = "results/methrix_h5"
+  output_directory = "results/methrix_h5",
+  validate = TRUE
 )
 
 methrix_object <- methrix::load_HDF5_methrix("results/methrix_h5")
 ```
 
-The exporter requires `HDF5Array`, `methrix`, `rhdf5`, `S4Vectors`, and `SummarizedExperiment`. It writes an `assays.h5` and `se.rds` directory through `methrix::save_HDF5_methrix()`, then by default reloads it with `methrix::load_HDF5_methrix()` and verifies CpG coordinates, sample metadata, coverage, beta values, and the uncovered-value mask. Set `validate = FALSE` only when this full validation pass is intentionally being skipped.
+The exporter uses `methrix::save_HDF5_methrix()` and, by default, reloads the result to validate coordinates, sample metadata, coverage, beta values, and the uncovered-value mask. Required R packages and details are documented in [the R compatibility guide](docs/R_METHRIX_COMPATIBILITY_GUIDE.md).
 
-## Performance
+## Outputs and annotation
 
-The assay writer stores sample-by-CpG HDF5 datasets with explicit chunking and writes bounded CpG blocks instead of materializing a full transposed copy. The processing pool limits concurrent per-sample temporary vectors to `--threads`, and HDF5, QC, and annotation outputs are staged and published as one rollback-capable transaction after native schema validation.
+- HDF5 assay file with beta and coverage matrices.
+- Coverage QC workbook from `qc-report` or `process`.
+- `CpG_annotation_report.xlsx` with bounded summary categories.
+- `CpG_annotation_details.tsv.gz` with unbounded per-CpG annotation detail when annotation is enabled.
+
+Outputs are staged and published transactionally after native schema validation.
 
 ## Development
 
-### Run tests
-
 ```bash
-# Unit and real minimal CLI integration tests
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
-
-# Benchmarks
-cargo bench
 ```
 
-### Project structure
+## Documentation
 
-```
-src/
-├── main.rs              # CLI entry point
-├── lib.rs               # Library exports
-├── cli/                 # Command implementations
-├── genome/              # Reference genome handling
-├── bismark/             # Bismark file processing
-├── processing/          # Core processing logic
-├── hdf5/                # HDF5 I/O
-└── qc/                  # Quality control
-```
+- [Documentation index](docs/INDEX.md)
+- [Build guide](docs/BUILD.md)
+- [HDF5 structure](docs/HDF5_STRUCTURE_AND_COORDINATES.md)
+- [R/Methrix compatibility](docs/R_METHRIX_COMPATIBILITY_GUIDE.md)
+- [Testing quick reference](docs/TESTING_QUICK_REF.md)
 
-## License
+## License and repository
 
-MIT License - see LICENSE file for details.
+MIT · [rainoffallingstar/methx](https://github.com/rainoffallingstar/methx)
