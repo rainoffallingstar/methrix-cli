@@ -227,9 +227,20 @@ assay(se, "beta")
 assay(se, "cov")
 ```
 
-**Loader status**: `HDF5Array` and `methrix` are not available in the current validation environment, and the custom schema intentionally does not claim compatibility with their standard loaders. No synthetic `se.rds` is generated.
+**Loader status**: the custom schema is intentionally not itself loadable through `HDF5Array::loadHDF5SummarizedExperiment()` or `methrix::load_HDF5_methrix()`. To create a native Methrix HDF5SummarizedExperiment directory, source the standalone exporter shipped at `scripts/export_methrix_hdf5.R`:
 
-For methrix package workflows, convert through an explicitly supported interchange format and validate that downstream path independently.
+```r
+source("scripts/export_methrix_hdf5.R")
+
+export_methx_h5_to_methrix(
+  methx_h5_path = "results/assays.h5",
+  output_directory = "results/methrix_h5"
+)
+
+methrix_object <- methrix::load_HDF5_methrix("results/methrix_h5")
+```
+
+The exporter requires `HDF5Array`, `methrix`, `rhdf5`, `S4Vectors`, and `SummarizedExperiment`. It writes an `assays.h5` and `se.rds` directory through `methrix::save_HDF5_methrix()`, then by default reloads it with `methrix::load_HDF5_methrix()` and verifies CpG coordinates, sample metadata, coverage, beta values, and the uncovered-value mask. Set `validate = FALSE` only when this full validation pass is intentionally being skipped.
 
 ## Performance
 

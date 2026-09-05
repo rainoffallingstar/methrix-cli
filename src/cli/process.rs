@@ -104,7 +104,9 @@ impl MethrixProcessor {
         let n_cpgs = self.cpg_data.cpgs.len();
         let mut beta_values = vec![f32::NAN; n_cpgs];
         let mut coverage_values = vec![0u32; n_cpgs];
-        let mut seen_keys = HashSet::with_capacity(records.len());
+        let mut aggregated_methylated_reads = vec![0u32; n_cpgs];
+        let mut aggregated_unmethylated_reads = vec![0u32; n_cpgs];
+        let mut seen_input_coordinates = HashSet::with_capacity(records.len());
         let mut matched_records = 0usize;
         let mut input_contigs = HashSet::new();
         let mut matched_contigs = HashSet::new();
@@ -112,26 +114,67 @@ impl MethrixProcessor {
         for record in records {
             let canonical_contig = canonical_contig_name(&record.chr);
             input_contigs.insert(canonical_contig.clone());
-            let key = (canonical_contig, record.start);
-            if !seen_keys.insert(key.clone()) {
+            let input_key = (canonical_contig.clone(), record.start);
+            if !seen_input_coordinates.insert(input_key.clone()) {
                 bail!(
                     "Duplicate CpG record in {} at canonical position {}:{}; aggregate duplicate counts upstream or remove duplicate rows",
                     file_path,
-                    key.0,
-                    key.1
+                    input_key.0,
+                    input_key.1
                 );
             }
 
-            if let Some(&reference_index) = self.cpg_index.get(&key) {
+            let reference_key = (canonical_contig.clone(), record.start);
+            let shifted_reference_key = record
+                .start
+                .checked_sub(1)
+                .map(|shifted_start| (canonical_contig.clone(), shifted_start));
+            let reference_index = self.cpg_index.get(&reference_key).copied().or_else(|| {
+                shifted_reference_key
+                    .as_ref()
+                    .and_then(|key| self.cpg_index.get(key).copied())
+            });
+
+            if let Some(reference_index) = reference_index {
                 matched_records += 1;
-                matched_contigs.insert(key.0.clone());
-                let total_reads = record.total_reads()?;
-                if total_reads >= min_coverage && total_reads > 0 {
-                    coverage_values[reference_index] = total_reads;
-                    beta_values[reference_index] = record
-                        .beta_value()?
-                        .context("Non-zero coverage unexpectedly produced no beta value")?;
-                }
+                matched_contigs.insert(input_key.0.clone());
+                aggregated_methylated_reads[reference_index] = aggregated_methylated_reads
+                    [reference_index]
+                    .checked_add(record.methylated_reads)
+                    .with_context(|| {
+                        format!(
+                            "Methylated coverage overflow for {}:{}",
+                            record.chr,
+                            record.start.saturating_add(1)
+                        )
+                    })?;
+                aggregated_unmethylated_reads[reference_index] = aggregated_unmethylated_reads
+                    [reference_index]
+                    .checked_add(record.unmethylated_reads)
+                    .with_context(|| {
+                        format!(
+                            "Unmethylated coverage overflow for {}:{}",
+                            record.chr,
+                            record.start.saturating_add(1)
+                        )
+                    })?;
+            }
+        }
+
+        for reference_index in 0..n_cpgs {
+            let methylated_reads = aggregated_methylated_reads[reference_index];
+            let unmethylated_reads = aggregated_unmethylated_reads[reference_index];
+            let total_reads = methylated_reads
+                .checked_add(unmethylated_reads)
+                .with_context(|| {
+                    format!(
+                        "Aggregated coverage overflow for CpG index {}",
+                        reference_index
+                    )
+                })?;
+            if total_reads >= min_coverage && total_reads > 0 {
+                coverage_values[reference_index] = total_reads;
+                beta_values[reference_index] = methylated_reads as f32 / total_reads as f32;
             }
         }
 
@@ -740,5 +783,71 @@ mod tests {
     fn rejects_duplicate_normalized_sample_ids() {
         let files = vec!["sample.cov".to_string(), "sample.cov.gz".to_string()];
         assert!(normalized_sample_names(&files).is_err());
+    }
+
+    #[test]
+    fn aggregates_bismark_cytosine_and_complementary_guanine_rows() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use tempfile::tempdir;
+
+        let temporary_directory = tempdir().unwrap();
+        let coverage_path = temporary_directory.path().join("sample.cov");
+        fs::write(
+            &coverage_path,
+            "chr1\t1\t1\t100.000000\t8\t0\nchr1\t2\t2\t0.000000\t0\t2\n",
+        )
+        .unwrap();
+
+        let processor = MethrixProcessor::new(CpGData {
+            cpgs: vec![CpGSite {
+                chr: "chr1".to_string(),
+                start: 0,
+                end: 2,
+                strand: '+',
+            }],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 2,
+            }],
+            release_name: "mini".to_string(),
+        })
+        .unwrap();
+        let processed = processor
+            .process_single_file(coverage_path.to_str().unwrap(), 1)
+            .unwrap();
+
+        assert_eq!(processed.coverage_values, vec![10]);
+        assert!((processed.beta_values[0] - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn preserves_cytosine_only_coverage_when_complementary_row_is_absent() {
+        use crate::genome::cpg::{ContigInfo, CpGData, CpGSite};
+        use tempfile::tempdir;
+
+        let temporary_directory = tempdir().unwrap();
+        let coverage_path = temporary_directory.path().join("sample.cov");
+        fs::write(&coverage_path, "chr1\t1\t1\t100.000000\t8\t0\n").unwrap();
+
+        let processor = MethrixProcessor::new(CpGData {
+            cpgs: vec![CpGSite {
+                chr: "chr1".to_string(),
+                start: 0,
+                end: 2,
+                strand: '+',
+            }],
+            contig_lens: vec![ContigInfo {
+                contig: "chr1".to_string(),
+                length: 2,
+            }],
+            release_name: "mini".to_string(),
+        })
+        .unwrap();
+        let processed = processor
+            .process_single_file(coverage_path.to_str().unwrap(), 1)
+            .unwrap();
+
+        assert_eq!(processed.coverage_values, vec![8]);
+        assert!((processed.beta_values[0] - 1.0).abs() < f32::EPSILON);
     }
 }
